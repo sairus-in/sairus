@@ -1,0 +1,1067 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ───────────────────────────────────────────────
+
+enum Role {
+  STUDENT
+  STAFF
+  DRIVER
+  COORDINATOR
+  TRANSPORT_OFFICER
+  FACULTY
+  MANAGEMENT
+  NCC_OFFICER
+}
+
+enum TripType {
+  MORNING
+  RETURN
+}
+
+enum TripStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  SELF_ARRANGED
+  LATE_BOARD
+  MANUAL
+  EXCUSED
+  PENDING
+}
+
+enum CheckInMethod {
+  QR_SCAN
+  MANUAL_DRIVER
+  MANUAL_ADMIN
+  SYSTEM_AUTO
+}
+
+enum AttendanceEventType {
+  CHECK_IN
+  MANUAL_CORRECTION
+  MARK_EXCUSED
+  SKIP_TODAY
+  WAIT_FOR_ME
+  TRIP_END_ABSENT
+  TRIP_END_PRESENT
+  ARRIVAL_VERIFIED
+  ARRIVAL_FLAGGED
+}
+
+enum IncidentType {
+  MECHANICAL
+  FLAT_TYRE
+  ACCIDENT
+  DRIVER_UNWELL
+  ROUTE_BLOCKED
+  OTHER
+}
+
+enum IncidentStatus {
+  REPORTED
+  ASSIGNED
+  RESOLVED
+  CANCELLED
+}
+
+enum EscalationLevel {
+  COORDINATOR
+  TRANSPORT_OFFICER
+  PRINCIPAL
+}
+
+enum ComplaintCategory {
+  DRIVER_BEHAVIOUR
+  BUS_CONDITION
+  TIMING_ISSUE
+  ROUTE_ISSUE
+  ATTENDANCE_ISSUE
+  OTHER
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum MessageType {
+  DIRECT
+  BROADCAST_ALL
+  BROADCAST_ROUTE
+  BROADCAST_BUS
+  SYSTEM_EVENT
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DelegateType {
+  GPS
+  KIOSK
+  BOTH
+}
+
+enum DelegateStatus {
+  PENDING
+  ACTIVE
+  ENDED
+  FAILED
+}
+
+enum DelegateEndReason {
+  DRIVER_RETURNED
+  MANUAL_END
+  TRIP_ENDED
+  COORDINATOR_ENDED
+  TIMEOUT
+  LOST_HEARTBEAT
+  CONCURRENT_ACTIVATION
+}
+
+enum DayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum AuthStatus {
+  ACTIVE
+  PENDING_PROVISIONING
+  AUTH_PROVISION_FAILED
+  DISABLED
+}
+
+enum AdminRole {
+  COORDINATOR
+  TRANSPORT_OFFICER
+  FACULTY
+  MANAGEMENT
+}
+
+enum AuthAuditEventType {
+  MOBILE_LOGIN_SUCCESS
+  MOBILE_LOGIN_FAILURE
+  MOBILE_REFRESH_SUCCESS
+  MOBILE_REFRESH_REJECTED
+  MOBILE_LOGOUT
+  LOGOUT_ALL_SESSIONS
+  DEVICE_REBOUND
+  DEVICE_MISMATCH_REJECTED
+  STALE_SESSION_REJECTED
+  FORCED_RELOGIN_REQUIRED
+  ADMIN_LOGIN_SUCCESS
+  ADMIN_LOGIN_FAILURE
+  ADMIN_LOGOUT
+  ADMIN_ACCOUNT_LOCKED
+  SESSION_VERSION_BUMPED
+  FORCED_RELOGIN_SET
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  INVITE_SENT
+  INVITE_ACCEPTED
+  ACCOUNT_DEACTIVATED
+  ACCOUNT_REACTIVATED
+  ADMIN_CREATED
+  ADMIN_ROLE_CHANGED
+  FIREBASE_PROVISION_SUCCESS
+  FIREBASE_PROVISION_FAILED
+  FIREBASE_PROVISION_RETRY
+}
+
+enum ImportStatus {
+  VALIDATING
+  VALIDATED_WITH_ERRORS
+  READY_TO_IMPORT
+  IMPORTING
+  DONE
+  DONE_WITH_ERRORS
+  FAILED
+  CANCELLED
+}
+
+enum ImportRowStatus {
+  PENDING
+  IMPORTED
+  FAILED
+  SKIPPED
+}
+
+// ─── USERS ───────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String
+  email     String?
+  role      Role     @default(STUDENT)
+  deviceId  String?
+  fcmToken  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Flat profile fields — no separate profile tables
+  rollNumber    String? @unique
+  department    String?
+  year          Int?
+  licenseNumber String?
+
+  // Phase D V2 Auth & Audit Metadata
+  authStatus            AuthStatus @default(PENDING_PROVISIONING)
+  authProvisionError    String?
+  authProvisionFailedAt DateTime?
+  importSessionId       String?
+  deactivatedAt         DateTime?
+  deactivatedById       String?
+  deactivationReason    String?
+
+  // Auth System Final — Session & Device Binding
+  firebaseUid           String?    @unique
+  registeredDeviceId    String?
+  sessionVersion        Int        @default(1)
+  lastLoginAt           DateTime?
+  deviceBoundAt         DateTime?
+  forcedReloginAt       DateTime?
+
+  routeAssignment       RouteAssignment?
+  attendanceLogs        AttendanceLog[]
+  attendanceEvents      AttendanceEvent[]      @relation("EventActor")
+  primaryAssignments    BusAssignment[]        @relation("PrimaryDriver")
+  substituteAssignments BusAssignment[]        @relation("SubstituteDriver")
+  tripsDriven           Trip[]                 @relation("TripDriver")
+  incidentsReported     Incident[]             @relation("IncidentReporter")
+  incidentsResolved     Incident[]             @relation("IncidentResolver")
+  coordinatedRoutes     RouteCoordinator[]
+  complaints            Complaint[]
+  correctionRequests    AttendanceCorrection[] @relation("CorrectionRequester")
+  correctionsReviewed   AttendanceCorrection[] @relation("CorrectionReviewer")
+  messagesSent          Message[]              @relation("Sender")
+  notifications         Notification[]
+  tripSkips             TripSkip[]
+  waitRequests          WaitRequest[]
+  delegationSessions    TripDelegate[]         @relation("DelegateUser")
+  activeDelegations     Trip[]                 @relation("ActiveDelegate")
+  authAuditEvents       AuthAuditEvent[]       @relation("SubjectAuditEvents")
+
+  @@index([phone])
+  @@index([role])
+  @@index([department])
+  @@map("users")
+}
+
+// ─── BUSES ───────────────────────────────────────────────
+
+model Bus {
+  id          String   @id @default(cuid())
+  number      String   @unique
+  plateNumber String   @unique
+  capacity    Int      @default(50)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Phase D V2 Trackers
+  currentTripId      String?
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String?
+
+  assignments BusAssignment[]
+  trips       Trip[]
+  incidents   Incident[]
+  gpsLogs     GpsLog[]
+  messages    Message[]
+  complaints  Complaint[]
+
+  @@map("buses")
+}
+
+// ─── ROUTES & STOPS ──────────────────────────────────────
+
+model Route {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  area       String
+  isActive   Boolean     @default(true)
+  activeDays DayOfWeek[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  // Phase D V2 Audit
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String?
+
+  stops         RouteStop[]
+  routeStopLogs RouteStopChangeLog[]
+  assignments   BusAssignment[]
+  students      RouteAssignment[]
+  coordinators  RouteCoordinator[]
+  adminScopes   AdminScope[]
+  trips         Trip[]
+  incidents     Incident[]
+
+  @@map("routes")
+}
+
+model Stop {
+  id        String   @id @default(cuid())
+  name      String
+  area      String?
+  lat       Float
+  lon       Float // lon not lng — locked forever
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  routeStops       RouteStop[]
+  routeAssignments RouteAssignment[]
+
+  @@map("stops")
+}
+
+model RouteStop {
+  id                   String  @id @default(cuid())
+  routeId              String
+  stopId               String
+  sequence             Int
+  scheduledTimeMorning Int // minutes since midnight (435 = 07:15)
+  scheduledTimeReturn  Int // minutes since midnight (1050 = 17:30)
+  isActive             Boolean @default(true)
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  stop  Stop  @relation(fields: [stopId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, stopId])
+  @@index([routeId, sequence])
+  @@map("route_stops")
+}
+
+// ─── ASSIGNMENTS ─────────────────────────────────────────
+
+model BusAssignment {
+  id            String    @id @default(cuid())
+  busId         String
+  routeId       String
+  driverId      String
+  substituteId  String?
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  bus        Bus    @relation(fields: [busId], references: [id])
+  route      Route  @relation(fields: [routeId], references: [id])
+  driver     User   @relation("PrimaryDriver", fields: [driverId], references: [id])
+  substitute User?  @relation("SubstituteDriver", fields: [substituteId], references: [id])
+  trips      Trip[]
+
+  @@index([routeId, isActive])
+  @@index([driverId, isActive])
+  @@map("bus_assignments")
+}
+
+model RouteAssignment {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  routeId       String
+  stopId        String
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  isActive      Boolean   @default(true)
+  isOverride    Boolean   @default(false)
+  overrideDate  DateTime?
+  createdAt     DateTime  @default(now())
+
+  // Phase D V2 Extended Audit
+  assignedById       String?
+  assignedAt         DateTime @default(now())
+  deactivatedById    String?
+  deactivationReason String?
+
+  user  User  @relation(fields: [userId], references: [id])
+  route Route @relation(fields: [routeId], references: [id])
+  stop  Stop  @relation(fields: [stopId], references: [id])
+
+  @@index([userId, routeId, isActive])
+  @@index([routeId, isActive])
+  @@index([userId]) // every check-in lookup
+  @@map("route_assignments")
+}
+
+model RouteCoordinator {
+  id      String @id @default(cuid())
+  userId  String
+  routeId String
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, routeId])
+  @@map("route_coordinators")
+}
+
+// ─── TRIPS ───────────────────────────────────────────────
+
+model Trip {
+  id              String     @id @default(cuid())
+  busAssignmentId String?
+  busId           String
+  routeId         String
+  driverId        String
+  type            TripType
+  status          TripStatus @default(SCHEDULED)
+  date            String // YYYY-MM-DD IST
+  expectedCount   Int        @default(0)
+  boardedCount    Int        @default(0)
+  absentCount     Int        @default(0)
+  startedAt       DateTime?
+  endedAt         DateTime?
+  delegateId      String?
+  gpsOutageStart  DateTime?
+  gpsStatus       String     @default("LIVE") // "LIVE" | "STALE" | "OFFLINE"
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  busAssignment  BusAssignment?  @relation(fields: [busAssignmentId], references: [id])
+  bus            Bus             @relation(fields: [busId], references: [id])
+  route          Route           @relation(fields: [routeId], references: [id])
+  driver         User            @relation("TripDriver", fields: [driverId], references: [id])
+  delegate       User?           @relation("ActiveDelegate", fields: [delegateId], references: [id])
+  attendanceLogs AttendanceLog[]
+  gpsLogs        GpsLog[]
+  incidents      Incident[]
+  waitRequests   WaitRequest[]
+  delegates      TripDelegate[]
+
+  @@unique([busId, date, type])
+  @@index([busId, status]) // CRITICAL — hottest query in system
+  @@index([busId, date])
+  @@index([routeId, date])
+  @@index([routeId, status, date])
+  @@index([driverId, date]) // Driver's app "get my trip today" lookup
+  @@index([date, status])
+  @@map("trips")
+}
+
+model TripDelegate {
+  id                  String             @id @default(cuid())
+  tripId              String
+  delegateId          String
+  delegateType        DelegateType
+  status              DelegateStatus     @default(PENDING)
+  operationId         String             @unique // for idempotency
+  activationLat       Float
+  activationLon       Float
+  distanceFromBus     Int?
+  activationMethod    String? // "GEOFENCE" | "ROUTE_ASSOCIATION"
+  activatedAt         DateTime?
+  endedAt             DateTime?
+  endReason           DelegateEndReason?
+  gpsReadingsProvided Int                @default(0)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  trip     Trip @relation(fields: [tripId], references: [id])
+  delegate User @relation("DelegateUser", fields: [delegateId], references: [id])
+
+  @@index([tripId, status])
+  @@index([delegateId, createdAt])
+  @@map("trip_delegates")
+}
+
+// ─── ATTENDANCE ──────────────────────────────────────────
+
+model AttendanceLog {
+  id          String           @id @default(cuid())
+  userId      String
+  tripId      String
+  busId       String
+  routeId     String
+  date        String // YYYY-MM-DD IST
+  dateKey     String // "2026-03-18" — fast exact-match queries
+  status      AttendanceStatus @default(PENDING)
+  method      CheckInMethod?
+  checkedInAt DateTime?
+
+  // Geofence context — logged on EVERY attempt (success AND failure)
+  lat             Float?
+  lon             Float?
+  distanceToBus   Int?
+  distanceToStop  Int?
+  boardedNearStop String?
+  geofenceMethod  String? // "BUS" | "STOP" | "BOTH"
+  failReason      String?
+
+  // Arrival verification (college gate check)
+  arrivalVerified     Boolean?   // null = not yet verified, true = at college, false = flagged
+  arrivalVerifiedAt   DateTime?
+  arrivalLat          Float?
+  arrivalLon          Float?
+  arrivalDistance     Int?       // metres from college gate at verification time
+  arrivalMethod       String?    // 'SOCKET' | 'PUSH_NOTIFICATION' | 'AUTO'
+
+  driverNote String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user        User                   @relation(fields: [userId], references: [id])
+  trip        Trip                   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  events      AttendanceEvent[]
+  corrections AttendanceCorrection[]
+
+  @@unique([userId, tripId])
+  @@index([userId, dateKey])
+  @@index([dateKey])
+  @@index([tripId])
+  @@index([tripId, status]) // CRITICAL — every admin table query
+  @@index([busId, tripId])
+  @@index([routeId, dateKey])
+  @@index([date, status])
+  @@map("attendance_logs")
+}
+
+model AttendanceEvent {
+  id             String              @id @default(cuid())
+  attendanceId   String
+  type           AttendanceEventType
+  method         CheckInMethod
+  actorId        String
+  previousStatus AttendanceStatus?
+  newStatus      AttendanceStatus
+  timestamp      DateTime            @default(now())
+  metadata       Json?
+
+  attendance AttendanceLog @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  actor      User?         @relation("EventActor", fields: [actorId], references: [id], map: "event_actor_fk")
+
+  @@index([attendanceId])
+  @@index([timestamp])
+  @@map("attendance_events")
+}
+
+model AttendanceCorrection {
+  id            String           @id @default(cuid())
+  attendanceId  String
+  requestedById String
+  reason        String
+  status        CorrectionStatus @default(PENDING)
+  reviewedById  String?
+  reviewNote    String?
+  reviewedAt    DateTime?
+  metadata      Json?
+  createdAt     DateTime         @default(now())
+
+  attendance  AttendanceLog @relation(fields: [attendanceId], references: [id])
+  requestedBy User          @relation("CorrectionRequester", fields: [requestedById], references: [id])
+  reviewedBy  User?         @relation("CorrectionReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status, createdAt])
+  @@map("attendance_corrections")
+}
+
+// ─── TRIP SKIP & WAIT FOR ME ─────────────────────────────
+
+model TripSkip {
+  id        String   @id @default(cuid())
+  userId    String
+  date      String
+  type      TripType
+  reason    String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date, type])
+  @@index([date, type])
+  @@map("trip_skips")
+}
+
+model WaitRequest {
+  id         String   @id @default(cuid())
+  userId     String
+  tripId     String
+  etaMinutes Int
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  trip Trip @relation(fields: [tripId], references: [id])
+
+  @@unique([userId, tripId])
+  @@index([tripId, createdAt])
+  @@map("wait_requests")
+}
+
+// ─── GPS ─────────────────────────────────────────────────
+
+model GpsLog {
+  id         String   @id @default(cuid())
+  busId      String
+  tripId     String?
+  lat        Float
+  lon        Float // lon not lng
+  speed      Float
+  heading    Float
+  accuracy   Float
+  timestamp  DateTime
+  providedBy String? // "DRIVER" | "DELEGATE"
+  providerId String?
+
+  bus  Bus   @relation(fields: [busId], references: [id], onDelete: Cascade)
+  trip Trip? @relation(fields: [tripId], references: [id])
+
+  @@index([busId, timestamp])
+  @@index([tripId, timestamp])
+  @@map("gps_logs")
+}
+
+// ─── INCIDENTS ───────────────────────────────────────────
+
+model Incident {
+  id              String          @id @default(cuid())
+  tripId          String
+  busId           String
+  routeId         String?
+  reportedById    String
+  resolvedById    String?
+  type            IncidentType
+  status          IncidentStatus  @default(REPORTED)
+  description     String
+  lat             Float?
+  lon             Float?
+  escalationLevel EscalationLevel @default(COORDINATOR)
+  alternateBusId  String?
+  resolutionNotes String?
+  reportedAt      DateTime        @default(now())
+  assignedAt      DateTime?
+  resolvedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  trip       Trip   @relation(fields: [tripId], references: [id])
+  bus        Bus    @relation(fields: [busId], references: [id])
+  route      Route? @relation(fields: [routeId], references: [id])
+  reportedBy User   @relation("IncidentReporter", fields: [reportedById], references: [id])
+  resolvedBy User?  @relation("IncidentResolver", fields: [resolvedById], references: [id])
+
+  @@index([busId, status])
+  @@index([routeId, createdAt])
+  @@index([status, reportedAt])
+  @@map("incidents")
+}
+
+// ─── COMPLAINTS ───────────────────────────────────────────
+
+model Complaint {
+  id          String            @id @default(cuid())
+  userId      String
+  busId       String?
+  category    ComplaintCategory
+  description String
+  status      ComplaintStatus   @default(OPEN)
+  resolution  String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+  bus  Bus? @relation(fields: [busId], references: [id])
+
+  @@index([status])
+  @@index([userId])
+  @@map("complaints")
+}
+
+// ─── MESSAGES ────────────────────────────────────────────
+
+model Message {
+  id        String      @id @default(cuid())
+  senderId  String
+  busId     String?
+  routeId   String?
+  tripId    String?
+  incidentId String?
+  contextType String?
+  contextId String?
+  type      MessageType @default(DIRECT)
+  body      String
+  isRead    Boolean     @default(false)
+  priority  String      @default("NORMAL") // "NORMAL" | "URGENT"
+  createdAt DateTime    @default(now())
+
+  sender User @relation("Sender", fields: [senderId], references: [id])
+  bus    Bus? @relation(fields: [busId], references: [id])
+
+  @@index([senderId])
+  @@index([busId])
+  @@index([routeId])
+  @@index([tripId])
+  @@index([incidentId])
+  @@index([contextType, contextId])
+  @@map("messages")
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  type      String
+  metadata  Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model NotificationDrop {
+  id        String   @id @default(cuid())
+  requestId String?
+  userIds   String[]
+  channels  String[]
+  payload   Json
+  priority  Int
+  reason    String
+  droppedAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([droppedAt])
+  @@map("notification_drops")
+}
+
+// ─── DATA IMPORT & AUDIT ─────────────────────────────────
+
+model ImportSession {
+  id            String       @id @default(cuid())
+  type          String // "STUDENT_IMPORT"
+  initiatedById String
+  fileChecksum  String
+  totalRows     Int
+  importedCount Int          @default(0)
+  failedCount   Int          @default(0)
+  status        ImportStatus @default(VALIDATING)
+  startedAt     DateTime     @default(now())
+  completedAt   DateTime?
+  rows          ImportRow[]
+
+  @@map("import_sessions")
+}
+
+model ImportRow {
+  id          String          @id @default(cuid())
+  sessionId   String
+  rowNumber   Int
+  rowData     Json // original CSV row chunk
+  status      ImportRowStatus
+  userId      String? // bounded upon creation
+  errorField  String?
+  errorReason String?
+
+  session ImportSession @relation(fields: [sessionId], references: [id])
+
+  @@map("import_rows")
+}
+
+model RouteStopChangeLog {
+  id            String   @id @default(cuid())
+  routeId       String
+  changedById   String
+  changedAt     DateTime @default(now())
+  changeSummary String
+  previousJson  String
+  newJson       String
+
+  route Route @relation(fields: [routeId], references: [id])
+
+  @@map("route_stop_change_logs")
+}
+
+// ─── AUTH: ADMIN USERS ───────────────────────────────────
+
+model AdminUser {
+  id                     String     @id @default(cuid())
+  name                   String
+  email                  String     @unique
+  passwordHash           String
+  role                   AdminRole
+  isActive               Boolean    @default(true)
+  sessionVersion         Int        @default(1)
+  lastLoginAt            DateTime?
+  lastLoginIp            String?
+  lastLoginUserAgent     String?
+  passwordResetTokenHash String?
+  passwordResetExpiresAt DateTime?
+  inviteTokenHash        String?
+  inviteTokenExpiresAt   DateTime?
+  mfaEnabled             Boolean    @default(false)
+  mfaSecretEncrypted     String?
+  createdById            String?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+  deactivatedAt          DateTime?
+  deactivatedById        String?
+
+  // New for admin-auth-system.md specification
+  isSuspended              Boolean     @default(false)
+  suspendedAt              DateTime?
+  suspendedBy              String?
+  suspendReason            String?
+  mfaBackupCodesUsedCount  Int         @default(0)
+  lastMfaBackupCodeUsedAt  DateTime?
+  passwordChangedAt        DateTime?
+  failedLoginAttempts      Int         @default(0)
+  lastFailedLoginAt        DateTime?
+  isLockedOut              Boolean     @default(false)
+  lockedOutUntil           DateTime?
+
+  scopes                    AdminScope[]
+  authAuditEvents           AuthAuditEvent[] @relation("AdminAuditEvents")
+  refreshTokens             AdminRefreshToken[]
+  backupCodes               AdminBackupCode[]
+  behaviorEvents            AdminBehaviorEvent[]
+  fingerprint               AdminFingerprint?
+  trustedDevices            AdminTrustedDevice[]
+  sentInvites               AdminInviteToken[] @relation("invitedInvitees")
+  acceptedInvites           AdminInviteToken[] @relation("acceptedInvites")
+  suspensions               AdminSuspension[]
+  createdSuspensions        AdminSuspension[] @relation("suspension_creator")
+  removedSuspensions        AdminSuspension[] @relation("suspension_remover")
+
+  @@map("admin_users")
+}
+
+// ─── AUTH: AUDIT LOG (APPEND-ONLY) ──────────────────────
+
+model AdminScope {
+  id          String   @id @default(cuid())
+  adminUserId String
+  routeId     String?
+  department  String?
+  createdAt   DateTime @default(now())
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  route     Route?    @relation(fields: [routeId], references: [id], onDelete: SetNull)
+
+  @@index([adminUserId])
+  @@index([routeId])
+  @@unique([adminUserId, routeId])
+  @@unique([adminUserId, department])
+  @@map("admin_scope")
+}
+
+// ─── ADMIN AUTH: REFRESH TOKEN WITH FAMILY ROTATION ──────
+
+model AdminRefreshToken {
+  id              String   @id @default(cuid())
+  adminId         String
+  tokenHash       String   @unique
+  familyId        String
+  sessionId       String
+  absoluteExp     BigInt
+  createdAt       DateTime @default(now())
+  lastUsedAt      DateTime?
+  isRevoked       Boolean  @default(false)
+  revokeReason    String?
+  deviceFpHash    String
+  ipAtCreation    String
+
+  adminUser       AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, createdAt])
+  @@index([familyId])
+  @@index([isRevoked, absoluteExp])
+  @@map("admin_refresh_tokens")
+}
+
+// ─── ADMIN AUTH: BACKUP CODES ────────────────────────── 
+
+model AdminBackupCode {
+  id        String   @id @default(cuid())
+  adminId   String
+  codeHash  String
+  isUsed    Boolean  @default(false)
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  adminUser AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@map("admin_backup_codes")
+}
+
+// ─── ADMIN AUTH: DEVICE FINGERPRINTS ──────────────────
+
+model AdminFingerprint {
+  id                    String   @id @default(cuid())
+  adminId               String   @unique
+  userAgent             String
+  acceptLanguage        String
+  timezone              String
+  screenRes             String
+  colorDepth            Int
+  platform              String
+  hardwareConcurrency   Int
+  deviceMemory          Int?
+  ipCountry             String
+  ipASN                 String
+  fpHash                String
+  lastVerdict           String   @default("MATCH")
+  lastDriftScore        Int      @default(0)
+  lastSeenAt            DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  adminUser             AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@map("admin_fingerprints")
+}
+
+// ─── ADMIN AUTH: BEHAVIOR EVENTS ──────────────────────
+
+model AdminBehaviorEvent {
+  id        String   @id @default(cuid())
+  adminId   String
+  sessionId String?
+  eventType String
+  timestamp DateTime @default(now())
+  metadata  Json?
+
+  adminUser AdminUser? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([adminId, timestamp])
+  @@index([sessionId, timestamp])
+  @@index([eventType, timestamp])
+  @@map("admin_behavior_events")
+}
+
+// ─── ADMIN AUTH: INVITE TOKENS ───────────────────────
+
+model AdminTrustedDevice {
+  id             String   @id @default(cuid())
+  adminId        String
+  deviceHash     String
+  userAgent      String
+  acceptLanguage String?
+  label          String?
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  lastIpAddress  String?
+  lastIpCountry  String?
+  revokedAt      DateTime?
+  revokedById    String?
+
+  adminUser      AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@unique([adminId, deviceHash])
+  @@index([adminId, revokedAt])
+  @@map("admin_trusted_devices")
+}
+
+model AdminInviteToken {
+  id              String   @id @default(cuid())
+  email           String
+  tokenHash       String   @unique
+  role            String
+  department      String?
+  invitedById     String
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  acceptedBy      String?
+  createdAt       DateTime @default(now())
+
+  invitedByUser   AdminUser? @relation("invitedInvitees", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedByUser  AdminUser? @relation("acceptedInvites", fields: [acceptedBy], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("admin_invite_tokens")
+}
+
+// ─── ADMIN AUTH: SUSPENSIONS ────────────────────────
+
+model AdminSuspension {
+  id              String   @id @default(cuid())
+  adminId         String
+  suspendedAt     DateTime @default(now())
+  suspendedBy     String
+  reason          String
+  unsuspendedAt   DateTime?
+  unsuspendedBy   String?
+  unsuspendReason String?
+
+  adminUser       AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  suspender       AdminUser @relation("suspension_creator", fields: [suspendedBy], references: [id])
+  unsuspender     AdminUser? @relation("suspension_remover", fields: [unsuspendedBy], references: [id])
+
+  @@index([adminId])
+  @@index([suspendedAt])
+  @@map("admin_suspensions")
+}
+
+model AuthAuditEvent {
+  id          String              @id @default(cuid())
+  actorType   String
+  actorId     String?
+  targetType  String?
+  targetId    String?
+  eventType   AuthAuditEventType
+  ipAddress   String?
+  deviceId    String?
+  metadata    Json?
+  createdAt   DateTime            @default(now())
+
+  mobileUser  User?      @relation("SubjectAuditEvents", fields: [actorId], references: [id], map: "audit_mobile_actor")
+  adminUser   AdminUser? @relation("AdminAuditEvents", fields: [actorId], references: [id], map: "audit_admin_actor")
+
+  @@index([actorId, createdAt])
+  @@index([targetId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("auth_audit_events")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorType  String
+  actorId    String
+  action     String
+  routeIds   String[] @default([])
+  entityType String?
+  entityId   String?
+  before     Json?
+  after      Json?
+  ip         String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_log")
+}

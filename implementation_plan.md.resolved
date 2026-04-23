@@ -1,0 +1,168 @@
+# College Bus Management System — Phase 1 Foundation Setup
+
+Build the complete Phase 1 foundation of the college bus management system monorepo. The workspace at `college-bus-system` has a basic scaffolding (empty app shells for backend/mobile/admin + packages/shared with stub files). This plan sets up the local dev infrastructure, implements all shared code, creates the Prisma database schema, and builds all backend modules into a working API server.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **This is a large build.** I'll focus on getting the **backend + shared packages + local dev infrastructure** fully working first. The mobile app and admin panel will be built in a follow-up task, since they depend on the backend being functional.
+
+> [!WARNING]
+> **Cloud services (GCP, Firebase, MSG91, Upstash)** — I'll create placeholder service wrappers with environment variables. You'll need to create accounts and fill in credentials before those integrations work. The system will work locally with Docker PostgreSQL + Redis without any cloud accounts.
+
+## Proposed Changes
+
+### 1. Local Dev Infrastructure
+
+#### [NEW] [docker-compose.yml](file:///c:/Users/krist/Desktop/college-bus-system/infra/docker/docker-compose.yml)
+- PostgreSQL 15 container (port 5432, db: `bus_management`, user: `postgres`, pass: `postgres`)
+- Redis 7 container (port 6379)
+- Both with persistent volumes
+
+#### [NEW] [.env.example](file:///c:/Users/krist/Desktop/college-bus-system/.env.example)
+- Template with all required env vars (DATABASE_URL, REDIS_URL, JWT_SECRET, Firebase, MSG91, etc.)
+
+#### [NEW] [.env](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/.env)
+- Working local dev config pointing to Docker containers
+
+#### [NEW] [CLAUDE.md](file:///c:/Users/krist/Desktop/college-bus-system/CLAUDE.md)
+- Project memory file documenting stack, architecture, conventions
+
+#### [MODIFY] [package.json](file:///c:/Users/krist/Desktop/college-bus-system/package.json)
+- Add workspace dev/build/lint scripts
+- Fix turbo pipeline references
+
+#### [MODIFY] [turbo.json](file:///c:/Users/krist/Desktop/college-bus-system/turbo.json)
+- Update to latest Turborepo v2 `tasks` format (replaces deprecated `pipeline`)
+
+#### [MODIFY] [.gitignore](file:///c:/Users/krist/Desktop/college-bus-system/.gitignore)
+- Add comprehensive ignores for node_modules, .env, dist, prisma generated, etc.
+
+---
+
+### 2. packages/shared — Types, Constants, Utils, Validators
+
+#### [MODIFY] All type files in `packages/shared/src/types/`
+- Fill in complete type definitions for all domain entities matching the plan docs
+- `user.types.ts` — enhance existing types with full role enum (STUDENT, DRIVER, COORDINATOR, TRANSPORT_OFFICER, FACULTY, MANAGEMENT)
+- `bus.types.ts` — Bus interface
+- `route.types.ts` — Route, Stop interfaces  
+- `attendance.types.ts` — AttendanceRecord, AttendanceStatus enum, AttendanceEvent
+- `trip.types.ts` — Trip, TripStatus, CheckIn
+- `incident.types.ts` — Incident, IncidentType, IncidentStatus
+- `qr.types.ts` — QRToken, QRPayload
+- `notification.types.ts` — NotificationPayload, NotificationType
+- `api.types.ts` — API request/response shapes
+
+#### [MODIFY] [constants/index.ts](file:///c:/Users/krist/Desktop/college-bus-system/packages/shared/src/constants/index.ts)
+- Roles, attendance constants (GEOFENCE_RADIUS_METRES = 100), trip constants, QR constants
+
+#### [MODIFY] [geo.utils.ts](file:///c:/Users/krist/Desktop/college-bus-system/packages/shared/src/geo.utils.ts)
+- Haversine `getDistanceMetres()` + `isWithinCheckinZone()` (the OR geofence logic)
+
+#### [NEW] [time.utils.ts](file:///c:/Users/krist/Desktop/college-bus-system/packages/shared/src/utils/time.utils.ts)
+- IST timezone helpers, timestamp formatting
+
+#### [NEW] [attendance.utils.ts](file:///c:/Users/krist/Desktop/college-bus-system/packages/shared/src/utils/attendance.utils.ts)
+- Attendance percentage calculation
+
+#### [NEW] Zod validators in `packages/shared/src/validators/`
+- `user.validator.ts` — phone, roll number
+- `checkin.validator.ts` — check-in request
+- `route.validator.ts` — route creation/edit
+
+#### [MODIFY] [index.ts](file:///c:/Users/krist/Desktop/college-bus-system/packages/shared/src/index.ts)
+- Re-export everything
+
+---
+
+### 3. Backend — Prisma Schema & DB
+
+#### [NEW] [schema.prisma](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/db/prisma/schema.prisma)
+Tables: `users`, `buses`, `routes`, `stops`, `route_stops`, `student_assignments`, `trips`, `attendance_logs`, `attendance_events`, `incidents`, `complaints`, `messages`, `notifications`
+- All with proper relations, indexes (student_id+date, bus_id+timestamp, route_id+date)
+- Enums for roles, attendance status, trip status, incident types
+
+#### [NEW] [seed.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/db/prisma/seeds/seed.ts)
+- Dev seed data (sample routes, buses, students, drivers)
+
+---
+
+### 4. Backend — Lib Layer
+
+#### [NEW] [prisma.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/prisma.ts)
+- Prisma client singleton
+
+#### [NEW] [redis.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/redis.ts)
+- Redis client (works with both local Docker Redis and Upstash)
+
+#### [NEW] [firebase.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/firebase.ts)
+- Firebase Admin SDK initialization (optional — graceful degradation if not configured)
+
+#### [NEW] [msg91.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/msg91.ts)
+- MSG91 SMS client wrapper
+
+---
+
+### 5. Backend — Auth Module
+
+#### [NEW] `apps/backend/src/modules/auth/`
+- `auth.middleware.ts` — JWT verification middleware, role guard
+- `auth.routes.ts` — POST /auth/login, /auth/verify, /auth/me
+- `auth.service.ts` — Token verification, JWT generation with role claims
+
+---
+
+### 6. Backend — Core Modules
+
+Each module follows the Routes → Service → Repository pattern:
+
+#### [NEW] `apps/backend/src/modules/users/` — Student/driver CRUD, bulk import
+#### [NEW] `apps/backend/src/modules/attendance/` — QR check-in, event sourcing, corrections
+#### [NEW] `apps/backend/src/modules/trips/` — Start/end trip, QR generation, stop advance
+#### [NEW] `apps/backend/src/modules/qr/` — Generate token, validate, burn nonce
+#### [NEW] `apps/backend/src/modules/gps/` — GPS update, Firebase RTDB write
+#### [NEW] `apps/backend/src/modules/routes/` — Route CRUD, stop management
+#### [NEW] `apps/backend/src/modules/incidents/` — Breakdown reporting, escalation
+#### [NEW] `apps/backend/src/modules/notifications/` — FCM + MSG91 service
+
+---
+
+### 7. Backend — WebSocket & Jobs
+
+#### [NEW] `apps/backend/src/websocket/`
+- `socket.ts` — Socket.io server setup with Redis adapter
+- `rooms.ts` — Room naming conventions
+- `events.ts` — Event name constants
+
+#### [NEW] `apps/backend/src/jobs/`
+- `absent.job.ts` — Mark absent when trip ends
+- `escalation.job.ts` — Breakdown escalation timer
+- `driver-alert.job.ts` — No-driver warning
+
+---
+
+### 8. Backend — App Assembly
+
+#### [MODIFY] [app.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/app.ts)
+- Wire all modules (auth, attendance, trips, GPS, routes, users, incidents, notifications)
+- Register all route prefixes
+- Error handling, validation hooks
+
+#### [NEW] [server.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/server.ts)
+- Separated entry point (imports app, starts server)
+
+---
+
+## Verification Plan
+
+### Automated Tests
+1. **Docker services**: Run `docker compose -f infra/docker/docker-compose.yml up -d` — verify PostgreSQL and Redis start
+2. **Shared package build**: Run `cd packages/shared && pnpm build` — verify TypeScript compiles without errors
+3. **Prisma migration**: Run `cd apps/backend && pnpm db:generate` — verify Prisma client generates
+4. **Backend start**: Run `cd apps/backend && pnpm dev` — verify server starts and `/health` responds with 200
+
+### Manual Verification
+1. Open `http://localhost:3000/health` in browser — should return `{"status":"ok","timestamp":"..."}`
+2. In Docker Desktop, verify two containers are running: `postgres` and `redis`
+3. Verify `pnpm db:studio` opens Prisma Studio and shows all tables

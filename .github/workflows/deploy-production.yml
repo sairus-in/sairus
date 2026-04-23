@@ -1,0 +1,211 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check-deploy-window:
+    name: Check deploy window
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check time (IST)
+        run: |
+          HOUR=$(TZ='Asia/Kolkata' date +%H)
+          MINUTE=$(TZ='Asia/Kolkata' date +%M)
+          DAY=$(TZ='Asia/Kolkata' date +%u)
+          echo "Current IST time: ${HOUR}:${MINUTE}, Day: ${DAY}"
+
+          if [ "$DAY" -ge 1 ] && [ "$DAY" -le 5 ]; then
+            if [ "$HOUR" -ge 6 ] && [ "$HOUR" -lt 10 ]; then
+              if [ "$HOUR" -gt 6 ] || [ "$MINUTE" -ge 30 ]; then
+                echo "BLOCKED: Cannot deploy during morning window (6:30am-10:00am IST, Mon-Fri)"
+                echo "Students are boarding buses. Try after 10:00am."
+                exit 1
+              fi
+            fi
+          fi
+          echo "Deploy window is safe"
+
+  ci:
+    name: Run CI Checks
+    uses: ./.github/workflows/ci.yml
+
+  deploy-backend:
+    name: Backend -> Production
+    runs-on: ubuntu-latest
+    needs: [check-deploy-window, ci]
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter shared build
+
+      - name: Build backend
+        run: pnpm --filter backend build
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push Docker image
+        run: |
+          gcloud builds submit \
+            --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-backend:${{ github.sha }} \
+            --config infra/cloudbuild/backend.yaml \
+            .
+
+      - name: Run database migrations
+        run: |
+          gcloud run jobs execute prisma-migrate-prod \
+            --args="migrate,deploy" \
+            --region asia-south1 \
+            --wait || echo "Migration job not configured yet"
+
+      - name: Deploy to Cloud Run (rolling)
+        run: |
+          gcloud run deploy bus-backend \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-backend:${{ github.sha }} \
+            --region asia-south1 \
+            --min-instances 2 \
+            --max-instances 10 \
+            --concurrency 80 \
+            --cpu 1 \
+            --memory 512Mi \
+            --no-cpu-throttling \
+            --no-allow-unauthenticated \
+            --set-secrets "DATABASE_URL=database-url:latest,REDIS_URL=redis-url:latest,JWT_SECRET=jwt-secret:latest,FIREBASE_SERVICE_ACCOUNT_JSON=firebase-sa:latest" \
+            --tag latest
+
+      - name: Verify production health
+        run: |
+          sleep 20
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.HEALTH_CHECK_TOKEN }}" \
+              https://bus-backend-${{ secrets.GCP_PROJECT_ID }}.run.app/v1/ready || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Production healthy"
+              exit 0
+            fi
+            echo "Attempt $i failed ($STATUS), retrying..."
+            sleep 10
+          done
+          echo "Production health check failed after 5 attempts"
+          exit 1
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "Production deployed successfully"
+          echo "SHA: ${{ github.sha }}"
+          echo "Time: $(TZ='Asia/Kolkata' date)"
+
+      - name: Auto-rollback on failure
+        if: failure()
+        run: |
+          echo "Deploy failed - rolling back to previous version"
+          gcloud run services update-traffic bus-backend \
+            --to-revisions=PREVIOUS=100 \
+            --region asia-south1
+          echo "Rollback complete"
+
+  deploy-admin:
+    name: Admin Panel -> Production
+    runs-on: ubuntu-latest
+    needs: [check-deploy-window, ci, deploy-backend]
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter shared build
+
+      - name: Build admin
+        run: |
+          cd apps/admin
+          VITE_API_URL=https://bus-backend-${{ secrets.GCP_PROJECT_ID }}.run.app pnpm build
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy admin to Cloud Run
+        run: |
+          gcloud builds submit \
+            --config infra/cloudbuild/admin.yaml \
+            --substitutions=_IMAGE_URL=gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-admin:${{ github.sha }},_VITE_API_URL=https://bus-backend-${{ secrets.GCP_PROJECT_ID }}.run.app \
+            .
+
+          gcloud run deploy bus-admin \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-admin:${{ github.sha }} \
+            --region asia-south1 \
+            --min-instances 1 \
+            --max-instances 5 \
+            --allow-unauthenticated
+
+  deploy-mobile-preview:
+    name: Mobile -> Expo Preview
+    runs-on: ubuntu-latest
+    needs: [check-deploy-window, ci]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build shared package
+        run: pnpm --filter shared build
+
+      - name: Publish OTA update
+        run: |
+          cd apps/mobile
+          eas update --auto

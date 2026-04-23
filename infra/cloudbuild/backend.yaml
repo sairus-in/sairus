@@ -1,0 +1,29 @@
+# Cloud Build configuration for backend
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_IMAGE_URL}'
+      - '-f'
+      - 'apps/backend/Dockerfile'
+      - '.'
+
+  # Push the image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_IMAGE_URL}'
+
+# Substitutions (set by GitHub Actions)
+substitutions:
+  _IMAGE_URL: gcr.io/${PROJECT_ID}/bus-backend:latest
+
+# Store images in Container Registry
+images:
+  - '${_IMAGE_URL}'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY

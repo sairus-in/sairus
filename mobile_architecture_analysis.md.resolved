@@ -1,0 +1,173 @@
+# Mobile Frontend Architecture: Intent vs Implementation Truth
+
+Date: 2026-03-24  
+Scope: `apps/mobile` architecture status and production readiness evidence.
+
+## Honesty Statement
+
+This document is not a praise summary. It separates:
+
+- intended architecture (target design),
+- verified implementation (what code currently does),
+- known risks and drift,
+- production hardening gates.
+
+Status labels used below:
+
+- **Verified**: behavior is confirmed in code paths.
+- **Partial**: implemented but incomplete or fallback-heavy.
+- **Intended**: design target exists in docs but is not fully proven in code.
+- **At Risk**: known drift or correctness concern exists.
+
+---
+
+## 1) Architecture Shape (What Is Structurally Good)
+
+### Routing and role isolation
+
+- **Verified**: route groups are split by auth/student/driver boundaries in `apps/mobile/app`.
+- **Verified**: root layout performs centralized session/role gating in `apps/mobile/app/_layout.tsx`.
+- **Partial**: route gate reliability depends on hydration and auth-path completeness.
+
+### State model
+
+- **Verified**: Zustand for local/session state and React Query for server state are separated in `apps/mobile/store` and `apps/mobile/lib/query-client.ts`.
+- **Verified**: background task context handoff uses AsyncStorage rather than in-memory cross-runtime access (`apps/mobile/tasks/gps.task.ts`).
+- **At Risk**: frontend repair/normalization logic can hide backend contract gaps (`apps/mobile/hooks/useStudentHome.ts`).
+
+### Realtime/GPS separation
+
+- **Verified**: dedicated GPS task module exists (`apps/mobile/tasks/gps.task.ts`).
+- **Verified**: socket hooks are role-specific (`apps/mobile/hooks/useKioskSocket.ts`, `apps/mobile/hooks/useStudentSocket.ts`).
+- **Partial**: realtime model currently uses a mix of push and fallback polling in parts of the student flow.
+
+---
+
+## 2) Verified Implementation Status by Subsystem
+
+### Auth
+
+- **Partial**: backend mobile auth service is robust and includes device/session controls (`apps/backend/src/modules/auth/mobile-auth.service.ts`).
+- **At Risk**: mobile OTP UI flow has previously been identified as not fully production-complete (`apps/mobile/app/(auth)/verify-otp.tsx`, see `docs/SYSTEM_FULL_ANALYSIS.md`).
+- **Verified**: request interceptor and 401 handling exist in mobile API client (`apps/mobile/lib/api.client.ts`).
+
+### Student home and contracts
+
+- **At Risk**: student home hook has carried contract compensation behavior where frontend fills missing backend business fields (`apps/mobile/hooks/useStudentHome.ts`, see `docs/SYSTEM_FULL_ANALYSIS.md`).
+- **Partial**: UI works functionally but contract authority is split between backend and mobile normalization.
+
+### Driver kiosk and trip operations
+
+- **Verified**: kiosk lifecycle responsibilities are centralized (wake lock, brightness behavior, socket integration, QR refresh fallback).
+- **Partial**: operational resilience still depends on reconnect behavior and runtime verification on real devices.
+
+### Background GPS
+
+- **Verified**: delta-threshold behavior and heartbeat updates are implemented (`apps/mobile/tasks/gps.task.ts`).
+- **Partial**: threshold tuning and stale/offline semantics require field validation against real movement/network conditions.
+
+### Realtime/socket discipline
+
+- **Verified**: socket infrastructure exists and is auth-aware.
+- **At Risk**: event documentation and runtime contracts have shown drift from code (`docs/SOCKET_EVENT_REGISTRY.md` vs backend emitters, see `docs/SYSTEM_FULL_ANALYSIS.md`).
+
+---
+
+## 3) Known Gaps and Drift Risks
+
+1. **Auth completion gap**  
+   Production-ready mobile OTP behavior is not fully proven end-to-end; this is a launch blocker for mobile hardening.
+
+2. **Frontend contract repair**  
+   Business data should come from backend BFF contracts; frontend should not synthesize domain truth for missing fields.
+
+3. **Realtime contract drift**  
+   Socket docs and implementation have diverged; this increases integration risk across mobile/admin/backend.
+
+4. **Startup/reconnect edge cases**  
+   Hydration timing, reconnect rejoin behavior, and stale-session transitions need deterministic validation on devices.
+
+5. **Evidence gap vs architecture claims**  
+   Structural quality is good, but maturity claims require runtime proof (tests/device QA/observability), not only file structure.
+
+---
+
+## 4) Production Readiness Gates
+
+Use this as a pass/fail checklist before claiming mobile is production-grade.
+
+### Contract integrity gates
+
+- [ ] Student home payload is backend-complete for all required UI business fields.
+- [ ] No frontend hook fabricates domain fields to compensate for missing backend data.
+- [ ] API contract docs are updated in the same PR as route/schema changes.
+
+### Auth readiness gates
+
+- [ ] OTP login flow is fully production-real on device (no dev fallback paths).
+- [ ] Session restore is deterministic (no route flicker, no half-auth state).
+- [ ] 401/refresh/relogin behavior has a single deterministic recovery path.
+
+### Realtime resilience gates
+
+- [ ] Socket event registry matches emitted/accepted events in code.
+- [ ] Reconnect path re-authenticates and rejoins required rooms cleanly.
+- [ ] Student and driver realtime behavior is validated for weak-network conditions.
+
+### Offline and failure UX gates
+
+- [ ] Offline queue semantics are explicit for success, replay rejection, and correction handoff.
+- [ ] Error-code-to-UX mapping exists for critical attendance/auth flows.
+- [ ] Stale-data UI states are explicit and non-misleading.
+
+### Proof gates
+
+- [ ] Critical mobile path QA evidence exists (login, restore, check-in, offline replay, reconnect).
+- [ ] Observability signals exist for major mobile failure modes.
+- [ ] Device-level verification covers at least one low-end Android scenario.
+
+---
+
+## 5) Hardening Priorities
+
+### P0
+
+1. Finish production-real OTP flow on mobile UI.
+2. Remove frontend contract repair from student home path by locking BFF response.
+3. Align socket/docs/contracts so published docs reflect runtime truth.
+4. Make startup hydration and auth redirect behavior deterministic.
+
+### P1
+
+1. Standardize mutation behavior (pending/success/error/invalidation) across critical screens.
+2. Harden reconnect logic (re-auth + room rejoin + lightweight reconciliation).
+3. Add regression coverage for critical hooks and auth boundaries.
+
+### P2
+
+1. Tune map/kiosk performance and render stability on low-end devices.
+2. Expand observability and operational alert coverage for mobile failures.
+
+---
+
+## 6) Claim-to-Evidence Register
+
+| Claim | Status | Evidence |
+|---|---|---|
+| Route groups and role split exist | Verified | `apps/mobile/app/*` |
+| Root layout performs central route gating | Verified | `apps/mobile/app/_layout.tsx` |
+| Zustand + React Query split exists | Verified | `apps/mobile/store/*`, `apps/mobile/lib/query-client.ts` |
+| Background GPS runtime handoff is implemented | Verified | `apps/mobile/tasks/gps.task.ts` |
+| Auth is fully production-complete on mobile UI | Partial / At Risk | `apps/mobile/app/(auth)/verify-otp.tsx`, `docs/SYSTEM_FULL_ANALYSIS.md` |
+| Student home contract is backend-authoritative | At Risk | `apps/mobile/hooks/useStudentHome.ts`, `apps/backend/src/modules/student/*`, `docs/SYSTEM_FULL_ANALYSIS.md` |
+| Socket docs match runtime event behavior | At Risk | `docs/SOCKET_EVENT_REGISTRY.md`, `apps/backend/src/modules/*`, `docs/SYSTEM_FULL_ANALYSIS.md` |
+
+---
+
+## 7) Change-Control Rules for This Doc
+
+1. No superlatives unless backed by concrete evidence.
+2. Every readiness claim must include a code/test/doc reference.
+3. If evidence is missing, classify as **Intended** or **Partial**, not **Verified**.
+4. Update this doc in the same PR when auth/contracts/realtime behavior changes.
+5. Keep this file as architecture truth status, not design marketing.

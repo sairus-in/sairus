@@ -1,0 +1,252 @@
+# Production Readiness Roadmap — College Bus System
+
+> Based on a full codebase audit of the monorepo, cross-referenced with two prior engineering reviews.
+
+---
+
+## What's Already Solid ✅
+
+Your schema and architecture are **genuinely excellent** — many of the critical fixes flagged in the senior-dev review have already been implemented:
+
+| Review Recommendation | Status |
+|---|---|
+| `DayOfWeek` enum instead of raw strings | ✅ Implemented |
+| `scheduledTimeMorning` as `Int` (minutes since midnight) | ✅ Implemented |
+| `dateKey` column for fast date queries | ✅ Implemented |
+| `@@index([busId, status])` on Trip | ✅ Present |
+| `@@index([tripId, status])` on AttendanceLog | ✅ Present |
+| `@@index([userId])` on RouteAssignment | ✅ Present |
+| Separate `/v1/live` (liveness) + `/v1/ready` (readiness) probes | ✅ Implemented |
+| Security headers (HSTS, X-Frame-Options, etc.) | ✅ Implemented |
+| CORS enforcement in production | ✅ Implemented |
+| Structured request IDs via `X-Request-Id` | ✅ Implemented |
+| Cloud Tasks for background jobs | ✅ 12 job files present |
+| Auth audit trail (`AuthAuditEvent`) | ✅ Comprehensive |
+| Admin MFA support | ✅ Schema + [admin-mfa.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/admin-mfa.ts) |
+| Import session tracking with dry-run | ✅ `ImportSession`/`ImportRow` models |
+| CI pipeline (typecheck, lint, test, security audit) | ✅ 4-job GitHub Actions |
+| Staging + Production deploy workflows | ✅ Separate YAML files |
+
+---
+
+## 🔴 TIER 1 — Fix Before Launch (Will Break in Week 1)
+
+### 1. Test Coverage Is Critically Low
+
+**Current state:** Only **5 test files** exist across the entire backend:
+- [lib/admin-mfa.test.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/admin-mfa.test.ts)
+- [lib/admin-session.test.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/admin-session.test.ts)
+- [lib/errors.test.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/lib/errors.test.ts)
+- `modules/auth/admin-auth.middleware.test.ts`
+- `modules/student/student-home.contract.test.ts`
+
+**What's missing:** Zero tests for the **hottest paths** — check-in, QR validation, trip lifecycle, attendance marking, GPS ingestion, and all 12 background jobs.
+
+**Action:**
+1. Write integration tests for the check-in flow (QR → validate → attendance → idempotency)
+2. Write tests for trip start/end lifecycle
+3. Write tests for the mark-absent job
+4. Write tests for the bulk import transactional flow
+5. Add authorization tests for every admin write endpoint
+
+---
+
+### 2. QR Nonce Race Condition — Verify Atomic `GETDEL`
+
+The senior-dev review flagged a critical race: `GET` → check → `DEL` on QR nonces allows double check-ins under load. The fix is a single `GETDEL` (Redis 6.2+).
+
+**Action:** Audit your QR validation code (`modules/qr/`) and confirm it uses `redis.getdel()` as a single atomic operation. If it still does `get` + `del` separately, fix it immediately.
+
+---
+
+### 3. Connection Pooling for Cloud Run
+
+Cloud Run horizontal scaling × Prisma default pool = connection exhaustion. At 10 instances × 10 connections = 100 connections, which exceeds most PostgreSQL defaults.
+
+**Action:**
+- Set `connection_limit=5&pool_timeout=20` in `DATABASE_URL` for Cloud Run
+- **Or** deploy PgBouncer as a Cloud SQL Proxy sidecar
+- **Or** use Prisma Accelerate
+
+---
+
+### 4. Graceful Shutdown Not Visible
+
+[server.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/server.ts) needs to handle `SIGTERM` gracefully — close Prisma, Redis, Socket.io, and BullMQ workers before exiting. Cloud Run sends `SIGTERM` on scale-down and deploys.
+
+**Action:** Verify [server.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/server.ts) has a shutdown hook:
+```typescript
+const signals = ['SIGTERM', 'SIGINT'];
+for (const signal of signals) {
+  process.on(signal, async () => {
+    await app.close();       // Fastify + Socket.io
+    await prisma.$disconnect();
+    await redis.quit();
+    process.exit(0);
+  });
+}
+```
+
+---
+
+## 🟡 TIER 2 — Fix Before Week 2 (Will Hurt Users)
+
+### 5. No GPS Data Retention / Cleanup
+
+At 180 buses × 1 ping/5s × 10hrs = **~1.3M rows/day**. Without cleanup, the `gps_logs` table hits 40M+ rows in a month.
+
+**Action:**
+- The [gps-cleanup.job.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/jobs/gps-cleanup.job.ts) file exists (762 bytes) — verify it's scheduled and actually aggregates + deletes old data
+- Define retention: 30 days raw GPS, aggregated summaries forever
+
+---
+
+### 6. Redis Password + TLS in Production
+
+Your [docker-compose.yml](file:///c:/Users/krist/Desktop/college-bus-system/infra/docker/docker-compose.yml) runs Redis without a password. Ensure your production Redis (likely Memorystore or Upstash) has:
+- Authentication enabled
+- TLS encryption
+- The `REDIS_URL` includes credentials
+
+---
+
+### 7. Socket.io Redis Adapter
+
+With `min-instances: 2+` on Cloud Run, Socket.io events emitted on instance A won't reach clients on instance B.
+
+**Action:** Confirm [websocket/socket.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/websocket/socket.ts) uses the `@socket.io/redis-adapter`:
+```typescript
+import { createAdapter } from '@socket.io/redis-adapter';
+io.adapter(createAdapter(pubClient, subClient));
+```
+
+---
+
+### 8. Database Migrations — Never On App Startup
+
+The CI pipeline correctly runs `prisma migrate deploy` as a step before the app starts. Verify this is also true for [deploy-production.yml](file:///c:/Users/krist/Desktop/college-bus-system/.github/workflows/deploy-production.yml) — migrations must run as a one-time job, not in the container entrypoint.
+
+---
+
+### 9. Secrets Management
+
+Verify that `JWT_SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON`, and `ADMIN_MFA_ENCRYPTION_KEY` are stored in **GCP Secret Manager**, not as plain-text env vars in Cloud Run config.
+
+**Also:** Ensure `firebase-service-account.json` is in `.dockerignore` so it never ships inside the container image.
+
+---
+
+## 🟠 TIER 3 — Fix Before Month 1 (Operational Debt)
+
+### 10. Structured Logging for Hot Paths
+
+[app.ts](file:///c:/Users/krist/Desktop/college-bus-system/apps/backend/src/app.ts) uses `fastify({ logger: true })` which is good (Pino JSON in production). But verify that every check-in attempt, trip state change, and job execution logs structured context:
+
+```typescript
+fastify.log.info({
+  event: 'checkin_attempt',
+  userId, tripId, busId,
+  distanceToBus, distanceToStop,
+  result: 'SUCCESS',
+  durationMs: Date.now() - startTime,
+});
+```
+
+---
+
+### 11. Monitoring & Alerting Dashboards
+
+The production-readiness checklist calls for dashboards tracking:
+- Auth failures
+- Check-in failures  
+- Job failures
+- Redis errors
+- WebSocket auth rejects
+- GPS outage counts
+- p95/p99 latency for critical endpoints
+
+**Action:** Set up Cloud Monitoring dashboards and alerting policies in GCP. None of the `infra/gcp/` folder has any Terraform or config for this yet (it's empty).
+
+---
+
+### 12. Infrastructure-as-Code Is Missing
+
+`infra/gcp/` is **empty**. No Terraform, Pulumi, or gcloud scripts for:
+- Cloud Run service config (`min-instances`, `max-instances`, concurrency)
+- Cloud SQL instance setup
+- Memorystore/Redis config
+- Secret Manager secrets
+- Cloud Tasks queues
+- Firebase RTDB rules
+- IAM service account bindings
+
+**Action:** Even if you deploy manually initially, document the exact GCP resource setup. Ideally, create Terraform configs so staging and production are reproducible.
+
+---
+
+### 13. Admin Panel — Optimistic Concurrency
+
+The senior-dev review flagged that route stop reordering (drag-and-drop → DELETE + INSERT) has no concurrency guard. Two admins editing the same route simultaneously will silently overwrite each other.
+
+**Action:** Add `updatedAt` / ETag checks on route mutations.
+
+---
+
+### 14. E2E Test Coverage
+
+[E2E_CRITICAL_PATHS.md](file:///c:/Users/krist/Desktop/college-bus-system/docs/E2E_CRITICAL_PATHS.md) exists but no actual E2E tests are implemented. Critical paths to cover:
+1. Login → trip start → QR scan → check-in → trip end → absent marking
+2. Admin login → bulk import → route assignment
+3. Incident report → escalation flow
+
+---
+
+### 15. Mobile Hardcoded API URLs
+
+Verify `apps/mobile/` reads the API URL from `expo-constants` / environment config, not a hardcoded localhost.
+
+---
+
+## 📋 Prioritized Action Checklist
+
+| # | Item | Severity | Effort |
+|---|---|---|---|
+| 1 | Write check-in flow integration tests | 🔴 Critical | 2-3 days |
+| 2 | Verify QR nonce uses atomic `GETDEL` | 🔴 Critical | 1 hour |
+| 3 | Configure DB connection pooling for Cloud Run | 🔴 Critical | 2 hours |
+| 4 | Add graceful shutdown hooks | 🔴 Critical | 1 hour |
+| 5 | Verify GPS cleanup job is scheduled & works | 🟡 High | 2 hours |
+| 6 | Secure Redis in production (auth + TLS) | 🟡 High | 1 hour |
+| 7 | Add Socket.io Redis adapter | 🟡 High | 2 hours |
+| 8 | Verify migrations don't run on startup | 🟡 High | 30 min |
+| 9 | Move secrets to GCP Secret Manager | 🟡 High | 2 hours |
+| 10 | Add structured logging to hot paths | 🟠 Medium | 1 day |
+| 11 | Set up Cloud Monitoring dashboards | 🟠 Medium | 1 day |
+| 12 | Create IaC for GCP resources | 🟠 Medium | 2-3 days |
+| 13 | Add optimistic concurrency on admin routes | 🟠 Medium | 4 hours |
+| 14 | Write E2E tests for critical paths | 🟠 Medium | 3-5 days |
+| 15 | Fix mobile hardcoded API URLs | 🟠 Medium | 1 hour |
+
+---
+
+## Recommended Order of Execution
+
+```
+Week 1 (Pre-Launch)
+├── Items 2, 3, 4 (quick critical fixes)
+├── Item 1 (test coverage for check-in flow)
+├── Items 6, 7, 8, 9 (infra hardening)
+└── Item 5 (GPS cleanup verification)
+
+Week 2 (Post-Launch Stabilization)
+├── Items 10, 11 (observability)
+├── Item 13 (admin concurrency)
+└── Item 15 (mobile API config)
+
+Week 3-4 (Operational Maturity)
+├── Item 12 (infrastructure-as-code)
+└── Item 14 (E2E test suite)
+```
+
+> [!IMPORTANT]
+> The architecture and schema are **production-caliber**. The gaps are in **operational readiness** — testing, infra config, monitoring, and deployment safety. Fix the Tier 1 items and you're safe to launch.

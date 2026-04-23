@@ -1,0 +1,129 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [develop]
+
+jobs:
+  ci:
+    name: Run CI Checks
+    uses: ./.github/workflows/ci.yml
+
+  deploy-backend-staging:
+    name: Backend → Staging
+    runs-on: ubuntu-latest
+    needs: [ci]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter shared build
+
+      - name: Build backend
+        run: pnpm --filter backend build
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push Docker image
+        run: |
+          gcloud builds submit \
+            --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-backend:staging-${{ github.sha }} \
+            --config infra/cloudbuild/backend.yaml \
+            .
+
+      - name: Run migrations on staging DB
+        run: |
+          gcloud run jobs execute prisma-migrate-staging \
+            --args="migrate,deploy" \
+            --region asia-south1 \
+            --wait || echo "Migration job not found, skipping"
+
+      - name: Deploy to Cloud Run staging
+        run: |
+          gcloud run deploy bus-backend-staging \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-backend:staging-${{ github.sha }} \
+            --region asia-south1 \
+            --min-instances 0 \
+            --max-instances 2 \
+            --concurrency 50 \
+            --memory 512Mi \
+            --cpu 1 \
+            --set-secrets "DATABASE_URL=database-url-staging:latest,REDIS_URL=redis-url-staging:latest,JWT_SECRET=jwt-secret-staging:latest" \
+            --allow-unauthenticated
+
+      - name: Verify staging health
+        run: |
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://bus-backend-staging-${{ secrets.GCP_PROJECT_ID }}.run.app/v1/ready || echo "000")
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check failed: $STATUS"
+            exit 1
+          fi
+          echo "Staging healthy ✓"
+
+  deploy-admin-staging:
+    name: Admin Panel → Staging
+    runs-on: ubuntu-latest
+    needs: [ci]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10.32.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter shared build
+
+      - name: Build admin
+        run: |
+          cd apps/admin
+          VITE_API_URL=https://bus-backend-staging-${{ secrets.GCP_PROJECT_ID }}.run.app pnpm build
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy admin to Cloud Run
+        run: |
+          gcloud builds submit \
+            --config infra/cloudbuild/admin.yaml \
+            --substitutions=_IMAGE_URL=gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-admin:staging-${{ github.sha }},_VITE_API_URL=https://bus-backend-staging-${{ secrets.GCP_PROJECT_ID }}.run.app \
+            .
+
+          gcloud run deploy bus-admin-staging \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/bus-admin:staging-${{ github.sha }} \
+            --region asia-south1 \
+            --min-instances 0 \
+            --max-instances 1 \
+            --allow-unauthenticated

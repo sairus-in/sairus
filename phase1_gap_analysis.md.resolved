@@ -1,0 +1,119 @@
+# Phase 1 — Remaining Work Gap Analysis
+
+> Cross-referenced [phase1-final-plan.md](file:///c:/Users/krist/Desktop/college-bus-system/phase1-final-plan.md) (25-step build order), [senior-dev-review.md](file:///c:/Users/krist/Desktop/college-bus-system/senior-dev-review.md), [phase-1-detailed-explanation.md](file:///c:/Users/krist/Desktop/college-bus-system/phase-1-detailed-explanation.md), [admin-panel-phase-d-v2.md](file:///c:/Users/krist/Downloads/admin-panel-phase-d-v2.md), and the actual codebase.
+
+## Build Order Status
+
+| # | Step | Status |
+|---|------|--------|
+| 1 | Monorepo scaffold | ✅ Done |
+| 2 | `packages/shared` — types, constants, geo.utils, time.utils | ✅ Done |
+| 3 | Docker Compose — Postgres + Redis | ✅ Done |
+| 4 | Prisma schema migration | ✅ Done |
+| 5 | Seed script | ⚠️ Partial — needs update for Phase D models |
+| 6 | Backend lib layer — prisma, redis, firebase, msg91 | ✅ Done |
+| 7 | Backend auth module | ✅ Done |
+| 8 | Backend `/health` endpoint | ❌ **Not hardened** — needs DB+Redis check |
+| 9 | Backend `/student/home` BFF | ✅ Done |
+| 10 | Backend QR module | ✅ Done |
+| 11 | Backend attendance check-in (13-step) | ⚠️ Partial — see hardening below |
+| 12 | Backend GPS module | ✅ Done |
+| 13 | Backend trips module (start/end/nightly) | ⚠️ Partial — nightly job exists but not fully wired |
+| 14 | Backend absence marking job | ❌ **Missing** |
+| 15 | Backend arrival verification | ❌ **Missing** |
+| 16 | Backend remaining modules | ✅ Done (incidents, notifications, users, messages) |
+| 17 | Mobile: auth screens | ✅ Done |
+| 18 | Mobile: driver kiosk QR display | ⚠️ **Needs verification** |
+| 19 | Mobile: student home + Firebase GPS | ⚠️ **Needs verification** |
+| 20 | Mobile: QR scanner + offline queue | ⚠️ **Needs verification** |
+| 21 | Mobile: verify-arrival deep link | ❌ **Missing** |
+| 22 | Admin: auth + attendance + corrections + live alerts | ✅ Done |
+| 23 | Admin: student CRUD + bulk import + route mgmt | ✅ Done |
+| 24 | CI/CD: GitHub Actions pipeline | ❌ **Missing** |
+| 25 | Full end-to-end test | ❌ **Not run** |
+
+---
+
+## Remaining Work — Grouped by Category
+
+### 🔴 A. Backend Hardening (from Senior Dev Review)
+
+These are critical gaps the `senior-dev-review.md` identified:
+
+| Item | Status | File |
+|------|--------|------|
+| Check-in GETDEL atomic nonce burn | ⚠️ Verify it uses `GETDEL` not GET→DEL | `attendance.service.ts` |
+| Rate limiting on check-in (3/min/user) | ❌ Missing | `attendance.service.ts` |
+| deviceId enforcement on check-in | ❌ Missing | `attendance.service.ts` |
+| Production `/health` (DB+Redis check) | ❌ Returns `{ status: 'ok' }` only | `app.ts` or `health.routes.ts` |
+| Pagination on attendance logs | ❌ Missing | `admin.routes.ts` |
+| Redis caching for hot paths (active trip, route assignment) | ⚠️ Partial | `attendance.service.ts` |
+| Structured JSON logging on check-in | ❌ Missing | `attendance.service.ts` |
+
+### 🔴 B. Backend Background Jobs
+
+| Job | Status | Planned File |
+|-----|--------|-------------|
+| Nightly trip pre-creation (11pm) | ❌ Missing | `jobs/create-daily-trips.job.ts` |
+| Mark absent on trip end | ❌ Missing | `jobs/mark-absent.job.ts` |
+| GPS heartbeat check (60s) | ❌ Missing | `jobs/gps-heartbeat.job.ts` |
+| GPS retention cleanup (nightly) | ❌ Missing | `jobs/gps-cleanup.job.ts` |
+| Late start alert (10min) | ❌ Missing | `jobs/late-start-alert.job.ts` |
+| Arrival push fallback (2min gate) | ❌ Missing | `jobs/arrival-push-fallback.job.ts` |
+
+> Only `jobs.routes.ts` exists currently (for auth provisioning). The 6 core background jobs above are **not yet implemented**.
+
+### 🟡 C. Backend Missing Endpoints
+
+| Endpoint | Status |
+|----------|--------|
+| `POST /v1/attendance/verify-arrival` | ❌ Missing |
+| `GET /v1/trips/late-starts` | ❌ Missing |
+| `POST /v1/attendance/skip-today` | ⚠️ Verify exists |
+| `POST /v1/attendance/wait-for-me` | ⚠️ Verify exists |
+
+### 🟡 D. Mobile App Gaps
+
+The mobile app directory structure exists with auth/driver/student route groups, but these specific features need verification or implementation:
+
+| Feature | Status |
+|---------|--------|
+| QR Scanner with parallel GPS prefetch | ⚠️ Verify |
+| Offline check-in queue hook (`useOfflineCheckinQueue`) | ⚠️ Verify |
+| Verify-arrival deep link screen | ❌ Missing |
+| GPS heartbeat "OFFLINE" indicator on map | ⚠️ Verify |
+| TripSkip + WaitForMe student UX | ⚠️ Verify |
+| Socket.io QR refresh on driver kiosk | ⚠️ Verify |
+
+### 🟢 E. Admin Panel
+
+> **Fully complete.** Phases A–D all checked off including:
+> - Live Ops Shell (dashboard, fleet map, trip detail, incidents, messages)
+> - Corrections queue, attendance reports
+> - Student CRUD + bulk CSV import
+> - Route editor with DnD + ConfirmWithImpactModal
+> - Fleet CRUD (buses + drivers)
+> - Operations Center (import tracking + auth provisioning)
+
+### 🔴 F. DevOps / Infrastructure
+
+| Item | Status |
+|------|--------|
+| GitHub Actions CI/CD pipeline | ❌ Missing |
+| Dockerfile for backend | ⚠️ Verify exists |
+| Cloud Run configuration (`min-instances=2`) | ❌ Missing |
+| GCP Secret Manager setup | ❌ Missing |
+| Prisma migrate as Cloud Run Job | ❌ Missing |
+| `.dockerignore` (exclude secrets) | ⚠️ Verify |
+
+---
+
+## Priority Order for Remaining Work
+
+1. **Backend jobs** — Nightly trip creation, absent marking, GPS heartbeat (system doesn't work without these)
+2. **Arrival verification** — Backend endpoint + mobile deep link screen
+3. **Check-in hardening** — GETDEL verify, rate limit, deviceId, structured logging
+4. **Mobile verification** — Confirm QR scanner, offline queue, kiosk refresh work end-to-end
+5. **Production health endpoint**
+6. **CI/CD pipeline** — GitHub Actions deploy to Cloud Run
+7. **Full E2E test** — The 25th build step

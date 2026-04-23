@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "shared": ["../../packages/shared/dist/index.d.ts"],
+      "shared/*": ["../../packages/shared/dist/*"]
+    },
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noEmit": false
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/lib/admin-audit-logger.ts",
+    "src/lib/admin-auth-utils.ts",
+    "src/lib/admin-rate-limiter.ts",
+    "src/lib/redis-client.ts",
+    "src/modules/auth/admin-auth-routes.ts",
+    "src/modules/auth/admin-auth-service-v2.ts",
+    "src/modules/auth/admin-auth-utils.ts"
+  ]
+}
