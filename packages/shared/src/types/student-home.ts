@@ -65,10 +65,32 @@ export interface StudentHomeFeatures {
   canRequestCorrection: boolean;
 }
 
+export interface RouteGeometryStop {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  sequence: number;
+  passed: boolean;
+  isMyStop: boolean;
+}
+
+export interface RouteGeometry {
+  stops: RouteGeometryStop[];
+  polyline: Array<[number, number]>;
+}
+
 export type StudentScreenState =
   | { status: 'no_trip' }
   | { status: 'trip_upcoming'; tripId: string; departureAt: string; busNumber: string }
-  | { status: 'trip_active'; tripId: string; busId: string; canCheckIn: boolean; busEta: number | null }
+  | {
+      status: 'trip_active';
+      tripId: string;
+      busId: string;
+      canCheckIn: boolean;
+      busEta: number | null;
+      distanceRemainingM: number | null;
+    }
   | { status: 'checked_in'; tripId: string; busId: string; checkedInAt: string }
   | { status: 'trip_completed'; tripId: string; completedAt: string };
 
@@ -87,6 +109,7 @@ export interface StudentHomeResponse {
     attendance: StudentHomeAttendance;
     history: StudentHomeHistory;
     alerts: StudentHomeAlerts;
+    routeGeometry: RouteGeometry | null;
   };
   features: StudentHomeFeatures;
 }

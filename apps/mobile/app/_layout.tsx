@@ -5,6 +5,15 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import { useFonts } from 'expo-font';
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+} from '@expo-google-fonts/inter';
+import { UbuntuMono_400Regular, UbuntuMono_700Bold } from '@expo-google-fonts/ubuntu-mono';
 import { queryClient } from '../lib/query-client';
 import { useAuth, useAuthStore } from '../store/auth.store';
 import { ApiError } from '../lib/api.client';
@@ -12,7 +21,9 @@ import { setupNotifications } from '../lib/notifications';
 import { fetchMobileProfile } from '../lib/mobile-profile';
 import { clearMobileSession } from '../lib/session';
 import { OfflineBanner } from '../components/shared/OfflineBanner';
+import { DevRoleOverlay } from '../components/dev/DevRoleOverlay';
 import { colors } from '../constants/theme';
+import { localFontAssets } from '../constants/local-fonts';
 
 const notificationScreenMap: Record<string, string> = {
   '/transport/verify-arrival': '/(student)/verify-arrival',
@@ -60,7 +71,16 @@ function AuthGate() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    if (!token) {
+    // DEV MODE: Skip profile fetch, trust the user set via dev-bypass
+    // Also guard: if we have a dev_token_*, bypass the profile fetch even if user is still being set
+    if (__DEV__ && token && token.startsWith('dev_token_')) {
+      syncedTokenRef.current = token;
+      setIsProfileSyncing(false);
+      setPhase('authenticated');
+      return;
+    }
+
+    if (!user || !token) {
       clearProfileSyncRetry();
       syncedTokenRef.current = null;
       profileSyncRetryCountRef.current = 0;
@@ -107,7 +127,12 @@ function AuthGate() {
           void clearMobileSession();
           setProfileSyncFailed(false);
           setProfileSyncErrorMessage(null);
-          router.replace('/(auth)/login');
+          
+          if (__DEV__) {
+            router.replace('/(auth)/dev-bypass');
+          } else {
+            router.replace('/(auth)/login');
+          }
           return;
         }
 
@@ -139,6 +164,27 @@ function AuthGate() {
     router,
   ]);
 
+  // DEV MODE: Guard against navigating to auth screens when we have a dev session
+  useEffect(() => {
+    if (!__DEV__ || !isLoaded) return;
+    if (!user && token?.startsWith('dev_token_')) {
+      // We have a dev token but no user yet - wait for user to be set
+      return;
+    }
+    if (user && token?.startsWith('dev_token_')) {
+      // DEV SESSION ACTIVE - prevent any navigation to login/verify-otp/pending
+      const isAtAuthScreen = segments.some(s => s === 'login' || s === 'verify-otp' || s === 'pending');
+      if (isAtAuthScreen) {
+        // Redirect based on role
+        if (user.role === 'DRIVER') {
+          router.replace('/(driver)/');
+        } else if (user.role === 'STUDENT' && user.routeAssignment) {
+          router.replace('/(student)/');
+        }
+      }
+    }
+  }, [user, token, isLoaded, segments, router]);
+
   // --- Role-based routing ---
   useEffect(() => {
     if (!isLoaded || isProfileSyncing) return;
@@ -148,8 +194,14 @@ function AuthGate() {
     const inStudentGroup = segments[0] === '(student)';
 
     if (!user || !token) {
-      // Not authenticated → go to login
-      if (!inAuthGroup) {
+      // Not authenticated
+      if (__DEV__) {
+        // In dev, if not on dev-bypass, go there
+        if (!segments.some(s => s === 'dev-bypass')) {
+          router.replace('/(auth)/dev-bypass');
+        }
+      } else if (!inAuthGroup) {
+        // In prod, if not in auth group, go to login
         router.replace('/(auth)/login');
       }
     } else {
@@ -227,33 +279,57 @@ function AuthGate() {
     };
   }, [user]);
 
-  // --- Splash while hydrating ---
-  if (!isLoaded || isProfileSyncing) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Slot />
+
+      {(!isLoaded || isProfileSyncing) && (
+        <View style={[StyleSheet.absoluteFill, styles.splash, { zIndex: 999 }]}>
+          <ActivityIndicator size="large" color="#356C8F" />
+        </View>
+      )}
+
+      {profileSyncFailed && profileSyncErrorMessage && (
+        <View style={[styles.warningBanner, { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000 }]}>
+          <Text style={styles.warningText}>{profileSyncErrorMessage}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function FontGate({ children }: { children: React.ReactNode }) {
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+    UbuntuMono_400Regular,
+    UbuntuMono_700Bold,
+    ...localFontAssets,
+  });
+
+  if (!fontsLoaded && !fontError) {
     return (
-      <View style={styles.splash}>
-        <ActivityIndicator size="large" color={colors.brand.primary} />
+      <View style={[StyleSheet.absoluteFill, styles.splash]}>
+        <ActivityIndicator size="large" color="#356C8F" />
       </View>
     );
   }
 
-  return (
-    <>
-      {profileSyncFailed && profileSyncErrorMessage ? (
-        <View style={styles.warningBanner}>
-          <Text style={styles.warningText}>{profileSyncErrorMessage}</Text>
-        </View>
-      ) : null}
-      <Slot />
-    </>
-  );
+  return <>{children}</>;
 }
 
 export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <StatusBar style="auto" />
-      <OfflineBanner />
-      <AuthGate />
+      <FontGate>
+        <OfflineBanner />
+        <AuthGate />
+        {__DEV__ && <DevRoleOverlay />}
+      </FontGate>
     </QueryClientProvider>
   );
 }

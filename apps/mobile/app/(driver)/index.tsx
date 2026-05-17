@@ -1,27 +1,40 @@
-// app/(driver)/index.tsx — Driver pre-trip assignment screen
-// HARDENED v3:
-//   - Wrapped in ScreenErrorBoundary
-//   - console.error removed, replaced with analytics.error (LAW 5)
-//   - All hardcoded '#FFF' replaced with theme token colors.white (LAW 2)
-//   - handleStartTrip is null-safe (never crashes if assignment is undefined)
-//   - analytics.track added to startTrip mutation (LAW 6 spirit for explicit calls)
-//   - Live attendance socket listener wired in for kiosk-redirect state
+// app/(driver)/index.tsx — Driver pre-trip home screen
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { driverService } from '../../services/driver.service';
 import { useAuth } from '../../store/auth.store';
 import { useTrip } from '../../store/trip.store';
-import { colors, typography, spacing, radii } from '../../constants/theme';
+import { typography } from '../../constants/theme';
 import { t } from '../../i18n';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { HomeLoadingSkeleton } from '../../components/shared/LoadingState';
 import { ScreenErrorBoundary } from '../../components/shared/ScreenErrorBoundary';
 import { analytics } from '../../lib/analytics';
+
+// ── Local tokens — warm palette ───────────────────────────────────
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  ghost: '#C9C9C9',
+  card: '#356C8F',
+  cardText: '#FFFFFF',
+  cardMuted: 'rgba(255, 255, 255, 0.7)',
+  cardSep: 'rgba(255, 255, 255, 0.15)',
+  btnBg: '#356C8F',
+  btnText: '#FFFFFF',
+  link: '#356C8F',
+  lateBg: '#FEF3C7',
+  lateText: '#78350F',
+  errorBg: '#FEE2E2',
+  errorText: '#991B1B',
+};
 
 export default function DriverHome() {
   return (
@@ -33,15 +46,16 @@ export default function DriverHome() {
 
 function DriverHomeContent() {
   const router = useRouter();
+  const reduceMotion = useReducedMotion();
   const user = useAuth((s) => s.user);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const setExpectedCount = useTrip((s) => s.setExpectedCount);
   const setQR = useTrip((s) => s.setQR);
 
-  const now = new Date();
-  const hours = now.getHours();
-  const greeting = hours < 12 ? t('driver.greeting') : 'Good afternoon,';
+  const hours = new Date().getHours();
+  const greeting = hours < 12 ? t('driver.greeting') : 'Good afternoon';
+  const firstName = user?.name?.split(' ')[0] || 'Driver';
 
   // SESSION_STABLE: the driver's daily assignment can change during the session, but not continuously.
   const { data: assignment, isLoading, refetch } = useQuery({
@@ -51,10 +65,9 @@ function DriverHomeContent() {
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchInterval: (query: any) => {
-      // Poll aggressively only before trip starts
       const status = query.state?.data?.trip?.status;
       if (status === 'SCHEDULED') return 30_000;
-      return false; // stop polling once trip is active/completed
+      return false;
     },
   });
 
@@ -70,17 +83,13 @@ function DriverHomeContent() {
   }, [assignment]);
 
   const handleStartTrip = async () => {
-    // Null-safety: assignment or trip could be undefined on a race
     if (!assignment?.trip?.id) {
       setStartError('No trip assigned. Please refresh.');
       return;
     }
-
     setStarting(true);
     setStartError(null);
-
-    analytics.track('scanner_opened', {}); // closest event: driver initiates trip
-
+    analytics.track('scanner_opened', {});
     try {
       const data = await driverService.startTrip({
         tripId: assignment.trip.id,
@@ -94,7 +103,6 @@ function DriverHomeContent() {
         params: { tripId: assignment.trip.id, busId: assignment.trip.busId },
       });
     } catch (err) {
-      // Structured error — no console.error, analytics captures it
       analytics.error(err as Error, { context: 'driver_start_trip' });
       setStartError('Failed to start trip. Please try again.');
     } finally {
@@ -105,202 +113,278 @@ function DriverHomeContent() {
   if (isLoading) return <HomeLoadingSkeleton />;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={s.container} edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{user?.name?.charAt(0) || 'D'}</Text>
-          </View>
-          <Text style={styles.greetingLine}>{greeting}</Text>
-          <Text style={styles.nameText}>{user?.name || 'Driver'}</Text>
-        </View>
+        <View style={s.layout}>
 
-        <View style={styles.body}>
+          {/* ── Identity ── */}
+          <Animated.View
+            entering={reduceMotion ? undefined : FadeInDown.duration(500).springify().damping(18)}
+            style={s.identityBlock}
+          >
+            <Text style={s.greetingText}>{greeting}</Text>
+            <Text style={s.nameText}>{firstName}</Text>
+          </Animated.View>
+
+          {/* ── Content ── */}
           {!assignment?.trip ? (
             <EmptyState title={t('driver.noTrip')} />
           ) : assignment.trip.status === 'COMPLETED' ? (
-            <View style={styles.completedCard}>
-              <Text style={styles.completedTitle}>{t('driver.tripComplete')}</Text>
+            <Animated.View
+              entering={reduceMotion ? undefined : FadeInDown.duration(500).delay(100).springify().damping(18)}
+              style={s.completedSection}
+            >
+              <Text style={s.completedTitle}>{t('driver.tripComplete')}</Text>
               <TouchableOpacity
-                style={styles.summaryBtn}
-                onPress={() =>
-                  router.push({
-                    pathname: '/(driver)/summary',
-                    params: { tripId: assignment.trip!.id },
-                  })
-                }
+                style={s.summaryLinkWrap}
+                onPress={() => router.push({
+                  pathname: '/(driver)/summary',
+                  params: { tripId: assignment.trip!.id },
+                })}
               >
-                <Text style={styles.summaryText}>{t('driver.viewSummary')}</Text>
+                <Text style={s.summaryLink}>{t('driver.viewSummary')}</Text>
               </TouchableOpacity>
-            </View>
+            </Animated.View>
           ) : (
             <>
-              {/* Assignment card */}
-              <View style={styles.card}>
-                <View style={styles.cardRow}>
-                  <Text style={styles.cardLabel}>Bus</Text>
-                  <Text style={styles.cardValue}>{assignment.bus?.number ?? 'N/A'}</Text>
-                </View>
-                <View style={styles.cardRow}>
-                  <Text style={styles.cardLabel}>Route</Text>
-                  <Text style={styles.cardValue}>{assignment.route?.name ?? 'N/A'}</Text>
-                </View>
-                <View style={styles.cardRow}>
-                  <Text style={styles.cardLabel}>{t('driver.departure')}</Text>
-                  <Text style={styles.cardValue}>
+              {/* ── Assignment card ── */}
+              <Animated.View
+                entering={reduceMotion ? undefined : FadeInDown.duration(500).delay(100).springify().damping(18)}
+                style={s.assignmentCard}
+              >
+                <Text style={s.routeName}>{assignment.route?.name ?? '—'}</Text>
+                {!!assignment.route?.area && (
+                  <Text style={s.routeArea}>{assignment.route.area}</Text>
+                )}
+                <View style={s.metaRow}>
+                  <Text style={s.metaText}>
+                    {assignment.bus?.number ?? '—'}
+                    {'  ·  '}
                     {assignment.trip?.scheduledDeparture ?? '—'}
+                    {'  ·  '}
+                    {assignment.expectedStudents ?? 0} students
                   </Text>
                 </View>
-                <View style={[styles.cardRow, { borderBottomWidth: 0 }]}>
-                  <Text style={styles.cardLabel}>{t('driver.expectedStudents')}</Text>
-                  <Text style={styles.cardValue}>{assignment.expectedStudents ?? 0}</Text>
-                </View>
-              </View>
+              </Animated.View>
 
-              {/* Route preview link */}
+              {/* ── Route preview ── */}
               <TouchableOpacity
+                style={s.previewLink}
                 onPress={() => router.push('/(driver)/route-preview')}
-                style={styles.previewLink}
+                activeOpacity={0.7}
               >
-                <Text style={styles.previewText}>{t('driver.viewStops')}</Text>
+                <Text style={s.previewText}>{t('driver.viewStops')} →</Text>
               </TouchableOpacity>
 
-              {/* Late warning */}
+              {/* ── Late warning ── */}
               {(assignment.trip.minutesLate ?? 0) > 0 && (
-                <View style={styles.lateWarning}>
-                  <Text style={styles.lateText}>
+                <Animated.View
+                  entering={reduceMotion ? undefined : FadeInDown.duration(400).delay(150).springify().damping(18)}
+                  style={s.lateWarning}
+                >
+                  <Text style={s.lateText}>
                     {t('driver.late', { minutes: String(assignment.trip.minutesLate) })}
                   </Text>
-                </View>
+                </Animated.View>
               )}
 
-              {/* Error state */}
+              {/* ── Error ── */}
               {startError && (
-                <View style={styles.errorBanner}>
-                  <Text style={styles.errorText}>{startError}</Text>
+                <View style={s.errorBanner}>
+                  <Text style={s.errorText}>{startError}</Text>
                   <TouchableOpacity onPress={() => void refetch()}>
-                    <Text style={styles.retryText}>Refresh</Text>
+                    <Text style={s.retryText}>Refresh</Text>
                   </TouchableOpacity>
                 </View>
               )}
 
-              {/* Start trip button */}
-              <TouchableOpacity
-                style={[styles.startButton, starting && { opacity: 0.7 }]}
-                onPress={handleStartTrip}
-                disabled={starting}
-                activeOpacity={0.8}
+              {/* ── Start trip ── */}
+              <Animated.View
+                entering={reduceMotion ? undefined : FadeInDown.duration(500).delay(200).springify().damping(18)}
+                style={s.btnSection}
               >
-                {starting ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.startText}>{t('driver.startTrip')}</Text>
-                )}
-              </TouchableOpacity>
-              <Text style={styles.startSub}>{t('driver.studentsCanCheckIn')}</Text>
+                <TouchableOpacity
+                  style={[s.btn, starting && s.btnStarting]}
+                  onPress={handleStartTrip}
+                  disabled={starting}
+                  activeOpacity={0.85}
+                  accessibilityLabel={starting ? 'Starting trip' : t('driver.startTrip')}
+                  accessibilityRole="button"
+                  accessibilityState={{ busy: starting }}
+                >
+                  {starting
+                    ? <ActivityIndicator color={C.btnText} />
+                    : <Text style={s.btnLabel}>{t('driver.startTrip')}</Text>
+                  }
+                </TouchableOpacity>
+                <Text style={s.btnSub}>{t('driver.studentsCanCheckIn')}</Text>
+              </Animated.View>
             </>
           )}
+
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.surface },
-  header: {
-    backgroundColor: colors.brand.primary,
-    paddingHorizontal: spacing.xl, paddingTop: spacing.lg, paddingBottom: spacing.xl,
+const s = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: C.bg,
   },
-  avatar: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center', alignItems: 'center', marginBottom: spacing.xs,
+  layout: {
+    paddingHorizontal: 28,
+    paddingTop: 36,
+    paddingBottom: 48,
+    gap: 20,
   },
-  avatarText: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    fontWeight: typography.weights.semibold, color: colors.white,
+
+  // Identity
+  identityBlock: {
+    gap: 4,
   },
-  greetingLine: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    color: 'rgba(255,255,255,0.7)',
+  greetingText: {
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.muted,
   },
   nameText: {
-    fontFamily: typography.family, fontSize: 26,
-    fontWeight: typography.weights.bold, color: colors.white, letterSpacing: -0.5,
+    fontFamily: typography.family,
+    fontSize: 30,
+    fontWeight: '700',
+    color: C.ink,
+    letterSpacing: -0.6,
   },
-  body: {
-    paddingHorizontal: spacing.xl, paddingTop: spacing.lg, paddingBottom: spacing['3xl'],
+
+  // Assignment card
+  assignmentCard: {
+    backgroundColor: C.card,
+    borderRadius: 20,
+    padding: 22,
   },
-  card: {
-    backgroundColor: colors.card.bg, borderWidth: 1, borderColor: colors.card.border,
-    borderRadius: radii.md, padding: spacing.md,
+  routeName: {
+    fontFamily: typography.family,
+    fontSize: 22,
+    fontWeight: '700',
+    color: C.cardText,
+    letterSpacing: -0.4,
   },
-  cardRow: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    paddingVertical: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.card.border,
+  routeArea: {
+    fontFamily: typography.family,
+    fontSize: 14,
+    color: C.cardMuted,
+    marginTop: 3,
   },
-  cardLabel: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    color: colors.text.secondary,
+  metaRow: {
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: C.cardSep,
   },
-  cardValue: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    fontWeight: typography.weights.medium, color: colors.text.primary,
+  metaText: {
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.cardMuted,
+    lineHeight: 20,
   },
-  previewLink: { paddingVertical: spacing.sm, alignItems: 'center' },
+
+  // Route preview link
+  previewLink: {
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
   previewText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    fontWeight: typography.weights.medium, color: colors.brand.primary,
+    fontFamily: typography.family,
+    fontSize: 14,
+    fontWeight: '500',
+    color: C.link,
   },
+
+  // Late warning — background tint, no border
   lateWarning: {
-    backgroundColor: colors.warning.bg, borderWidth: 1, borderColor: colors.warning.border,
-    borderRadius: radii.sm, padding: spacing.md, marginBottom: spacing.md,
+    backgroundColor: C.lateBg,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   lateText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    color: colors.warning.text,
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.lateText,
+    textAlign: 'center',
   },
+
+  // Error banner — background tint, no border
   errorBanner: {
-    backgroundColor: colors.error.bg, borderWidth: 1, borderColor: colors.error.border,
-    borderRadius: radii.sm, padding: spacing.md,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: spacing.md,
+    backgroundColor: C.errorBg,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   errorText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    color: colors.error.text, flex: 1,
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.errorText,
+    flex: 1,
   },
   retryText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    fontWeight: typography.weights.semibold, color: colors.brand.primary,
-    marginLeft: spacing.xs,
+    fontFamily: typography.family,
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.link,
+    marginLeft: 8,
   },
-  startButton: {
-    backgroundColor: colors.button.primary.bg, paddingVertical: 15,
-    borderRadius: radii.button, alignItems: 'center', marginTop: spacing.lg,
-    minHeight: 50,
+
+  // Start trip
+  btnSection: {
+    gap: 10,
   },
-  startText: {
-    fontFamily: typography.family, fontSize: 15,
-    fontWeight: typography.weights.semibold, color: colors.button.primary.text,
+  btn: {
+    backgroundColor: C.btnBg,
+    height: 54,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  startSub: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    color: colors.text.muted, textAlign: 'center', marginTop: spacing.xs,
+  btnStarting: {
+    opacity: 0.6,
   },
-  completedCard: {
-    backgroundColor: colors.success.bg, borderRadius: radii.md,
-    padding: spacing.xl, alignItems: 'center',
+  btnLabel: {
+    fontFamily: typography.family,
+    fontSize: 16,
+    fontWeight: '600',
+    color: C.btnText,
+  },
+  btnSub: {
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.muted,
+    textAlign: 'center',
+  },
+
+  // Completed state
+  completedSection: {
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 40,
   },
   completedTitle: {
-    fontFamily: typography.family, fontSize: typography.sizes.h2,
-    fontWeight: typography.weights.semibold, color: colors.success.text,
+    fontFamily: typography.family,
+    fontSize: 20,
+    fontWeight: '600',
+    color: C.ink,
   },
-  summaryBtn: { marginTop: spacing.md },
-  summaryText: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    fontWeight: typography.weights.medium, color: colors.brand.primary,
+  summaryLinkWrap: {
+    paddingVertical: 6,
+  },
+  summaryLink: {
+    fontFamily: typography.family,
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.link,
   },
 });

@@ -36,6 +36,7 @@ import {
 } from './admin-anomaly.service';
 import { syncAdminFingerprint } from './admin-fingerprint.service';
 import * as adminAuthRepository from './admin-auth.repository';
+import { actorCache } from '../../spine/auth';
 
 const DUMMY_BCRYPT_HASH = bcrypt.hashSync('dummy-password-for-timing-safety', 12);
 
@@ -647,4 +648,63 @@ export const consumeAdminStepUpToken = async (
     parsed.ipHash === hashContextValue(ipAddress) &&
     parsed.userAgentHash === hashContextValue(userAgent)
   );
+};
+
+// ---------------------------------------------------------------------------
+// Admin user management — exposed here so callers never bypass the service
+// layer to reach admin-auth.repository directly.
+// ---------------------------------------------------------------------------
+
+export const listAdminUsersForManagement = () =>
+  adminAuthRepository.listAdminUsersForManagement();
+
+export const findAdminByEmail = (email: string) =>
+  adminAuthRepository.findAdminByEmail(email);
+
+export const hashAdminPassword = (plainPassword: string) =>
+  adminAuthRepository.hashPassword(plainPassword);
+
+export const createAdminInvite = (data: {
+  email: string;
+  name: string;
+  role: 'COORDINATOR' | 'TRANSPORT_OFFICER' | 'FACULTY' | 'MANAGEMENT';
+  passwordHash: string;
+  inviteTokenHash: string;
+  inviteTokenExpiresAt: Date;
+  createdById: string;
+  routeIds?: string[];
+  department?: string | null;
+}) => adminAuthRepository.createAdminInvite(data);
+
+export const updateAdminProfileAndScopes = async (data: {
+  adminId: string;
+  name?: string;
+  role?: 'COORDINATOR' | 'TRANSPORT_OFFICER' | 'FACULTY' | 'MANAGEMENT';
+  routeIds?: string[];
+  department?: string | null;
+}) => {
+  const result = await adminAuthRepository.updateAdminProfileAndScopes(data);
+  // Role / scope change invalidates the cached capability set.
+  await actorCache.invalidate('admin', data.adminId);
+  return result;
+};
+
+export const suspendAdminUser = async (data: {
+  adminId: string;
+  suspendedBy: string;
+  reason: string;
+}) => {
+  const result = await adminAuthRepository.suspendAdminUser(data);
+  await actorCache.invalidate('admin', data.adminId);
+  return result;
+};
+
+export const unsuspendAdminUser = async (data: {
+  adminId: string;
+  unsuspendedBy: string;
+  reason?: string | null;
+}) => {
+  const result = await adminAuthRepository.unsuspendAdminUser(data);
+  await actorCache.invalidate('admin', data.adminId);
+  return result;
 };

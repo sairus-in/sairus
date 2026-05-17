@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AdminActionContext, AdminMessageInput } from 'shared';
+import { AdminActionContext, AdminMessage, AdminMessageInput } from 'shared';
+import { format, isToday, isYesterday } from 'date-fns';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMessages } from '../../hooks/useMessages';
 import { useActiveTrips } from '../../hooks/useActiveTrips';
 import { useCommandCenter, useSendContextMessage } from '../../hooks/useCommandCenter';
 import { extractApiError } from '../../lib/api-error';
 import { useAuthStore } from '../../store/auth.store';
-import { AlertCircle, Bus, MessageSquare, Send, Siren, Users } from 'lucide-react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { Icon } from '../../components/design/Icon';
 
 type InboxThread = {
   key: string;
@@ -15,29 +16,59 @@ type InboxThread = {
   scope: string;
   context?: AdminActionContext;
   busId?: string;
-  accent: string;
+  tripId?: string;
+  routeId?: string;
+  tone: 'ok' | 'warn' | 'err' | 'info' | 'idle';
 };
 
-const panelStyle: React.CSSProperties = {
-  background: '#111827',
-  border: '1px solid #1F2937',
-  borderRadius: 20,
-  padding: '1rem',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '1rem',
-  minHeight: 0,
+const dateGroupLabel = (date: Date) => {
+  if (isToday(date)) {
+    return 'TODAY';
+  }
+  if (isYesterday(date)) {
+    return 'YESTERDAY';
+  }
+  return format(date, 'EEE, MMM d').toUpperCase();
 };
 
 export const Messages: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { capabilities } = useAuthStore();
   const { data: commandCenter } = useCommandCenter();
   const { data: activeTrips = [] } = useActiveTrips();
   const sendContextMessage = useSendContextMessage();
-
   const [selectedThreadKey, setSelectedThreadKey] = useState('broadcast-global');
   const [inputText, setInputText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  const [threadSearch, setThreadSearch] = useState('');
+
+  const navState = location.state as {
+    contextType?: string;
+    contextId?: string;
+    composerPrefill?: string;
+  } | null;
+
+  // Pre-select thread from incident navigation — reads commandCenter directly so
+  // it can set selectedThreadKey before the threads useMemo finishes computing.
+  useEffect(() => {
+    const incidentId = navState?.contextId ?? searchParams.get('incidentId');
+    const contextType = navState?.contextType ?? searchParams.get('contextType');
+    if (incidentId && contextType === 'INCIDENT') {
+      const entity = commandCenter?.entities?.find(
+        (e) => e.context.contextType === 'INCIDENT' && e.context.contextId === incidentId,
+      );
+      if (entity) {
+        setSelectedThreadKey(`INCIDENT-${incidentId}`);
+      }
+    }
+
+    if (navState?.composerPrefill) {
+      setInputText(navState.composerPrefill);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [commandCenter, location.pathname, navState, navigate, searchParams]);
 
   const threads = useMemo<InboxThread[]>(() => {
     const items = new Map<string, InboxThread>();
@@ -53,7 +84,7 @@ export const Messages: React.FC = () => {
         title: 'Global Broadcast',
         subtitle: 'All drivers and coordinators',
       },
-      accent: '#38BDF8',
+      tone: 'info',
     });
 
     for (const entity of commandCenter?.entities ?? []) {
@@ -66,7 +97,9 @@ export const Messages: React.FC = () => {
           scope: entity.context.contextType,
           context: entity.context,
           busId: entity.context.busId,
-          accent: entity.priority === 'CRITICAL' ? '#EF4444' : entity.priority === 'HIGH' ? '#F97316' : '#F59E0B',
+          tripId: entity.context.tripId,
+          routeId: entity.context.routeId,
+          tone: entity.priority === 'CRITICAL' ? 'err' : entity.priority === 'HIGH' ? 'warn' : 'info',
         });
       }
     }
@@ -76,8 +109,8 @@ export const Messages: React.FC = () => {
       if (!items.has(key)) {
         items.set(key, {
           key,
-          title: `Bus ${trip.busNumber} - ${trip.routeName}`,
-          subtitle: `${trip.boardedCount}/${trip.expectedCount} boarded`,
+          title: `Bus ${trip.busNumber}`,
+          subtitle: `${trip.routeName} - ${trip.boardedCount}/${trip.expectedCount} boarded`,
           scope: 'TRIP',
           context: {
             contextType: 'TRIP',
@@ -88,13 +121,26 @@ export const Messages: React.FC = () => {
             subtitle: `Bus ${trip.busNumber}`,
           },
           busId: trip.busId,
-          accent: trip.gpsStatus === 'OFFLINE' ? '#EF4444' : trip.gpsStatus === 'STALE' ? '#F59E0B' : '#22C55E',
+          tripId: trip.id,
+          tone: trip.gpsStatus === 'OFFLINE' ? 'err' : trip.gpsStatus === 'STALE' ? 'warn' : 'ok',
         });
       }
     }
 
     return Array.from(items.values());
   }, [activeTrips, commandCenter?.entities]);
+
+  const visibleThreads = useMemo(() => {
+    const q = threadSearch.toLowerCase().trim();
+    if (!q) {
+      return threads;
+    }
+    return threads.filter((thread) =>
+      thread.title.toLowerCase().includes(q)
+        || thread.subtitle.toLowerCase().includes(q)
+        || thread.scope.toLowerCase().includes(q),
+    );
+  }, [threadSearch, threads]);
 
   useEffect(() => {
     if (!threads.some((thread) => thread.key === selectedThreadKey)) {
@@ -104,6 +150,43 @@ export const Messages: React.FC = () => {
 
   const selectedThread = threads.find((thread) => thread.key === selectedThreadKey) ?? threads[0];
   const { data: messages = [], isLoading } = useMessages(selectedThread?.busId, 100, selectedThread?.context);
+
+  const selectedTripState = useMemo(
+    () => activeTrips.find((trip) => trip.id === selectedThread?.tripId) ?? null,
+    [activeTrips, selectedThread?.tripId],
+  );
+
+  const messageGroups = useMemo(() => {
+    const groups = new Map<string, AdminMessage[]>();
+    for (const message of messages) {
+      const date = new Date(message.createdAt);
+      const key = format(date, 'yyyy-MM-dd');
+      const group = groups.get(key);
+      if (group) {
+        group.push(message);
+      } else {
+        groups.set(key, [message]);
+      }
+    }
+    return Array.from(groups.entries()).map(([key, items]) => ({
+      key,
+      label: dateGroupLabel(new Date(key)),
+      items,
+    }));
+  }, [messages]);
+
+  const lastMessageByThread = useMemo(() => {
+    if (selectedThread && messages.length > 0) {
+      return messages[messages.length - 1];
+    }
+    return null;
+  }, [messages, selectedThread]);
+
+  const handleOpenTrip = () => {
+    if (selectedThread?.tripId) {
+      navigate(`/ops/trips/${selectedThread.tripId}`);
+    }
+  };
 
   const sendMessage = async () => {
     if (!inputText.trim() || !selectedThread) {
@@ -135,264 +218,210 @@ export const Messages: React.FC = () => {
     }
   };
 
-  const incidentThreads = threads.filter((thread) => thread.scope === 'INCIDENT' || thread.scope === 'GPS_OUTAGE');
-  const tripThreads = threads.filter((thread) => thread.scope === 'TRIP');
-
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: '1rem', height: '100%' }}>
-      <section style={{ ...panelStyle, overflow: 'hidden' }}>
-        <div>
-          <div style={{ fontSize: '0.78rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#38BDF8', fontWeight: 800 }}>
-            Ops Inbox
+    <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      {/* Left sidebar — Inbox */}
+      <div style={{ width: 280, flexShrink: 0, borderRight: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--divider)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+            <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 500 }}>Inbox</h2>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>{visibleThreads.length} thread{visibleThreads.length !== 1 ? 's' : ''}</span>
           </div>
-          <h2 style={{ margin: '0.35rem 0 0', fontSize: '1.4rem', fontWeight: 800 }}>Contextual communications</h2>
-          <p style={{ margin: '0.45rem 0 0', color: '#9CA3AF', fontSize: '0.9rem' }}>
-            Threads are bound to operations context, not just a bus number.
-          </p>
+          <div className="searchbar">
+            <Icon name="search" size={12} />
+            <input
+              value={threadSearch}
+              onChange={(event) => setThreadSearch(event.target.value)}
+              placeholder="Search threads"
+              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 12, color: 'var(--ink)' }}
+            />
+          </div>
         </div>
-
-        <div style={{ display: 'grid', gap: '0.75rem', overflowY: 'auto' }}>
-          <div>
-            <div style={{ color: '#64748B', fontSize: '0.74rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
-              Broadcast
+        <div className="scroll" style={{ flex: 1 }}>
+          {visibleThreads.length === 0 ? (
+            <div className="muted" style={{ padding: 16, textAlign: 'center', fontSize: 12 }}>
+              {threadSearch ? 'No threads match your search.' : 'No threads yet.'}
             </div>
-            {threads
-              .filter((thread) => thread.scope === 'BROADCAST')
-              .map((thread) => (
-                <button
-                  key={thread.key}
-                  type="button"
-                  onClick={() => setSelectedThreadKey(thread.key)}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '0.95rem 1rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    backgroundColor: selectedThread?.key === thread.key ? '#1E293B' : '#0F172A',
-                    border: `1px solid ${selectedThread?.key === thread.key ? thread.accent : '#1F2937'}`,
-                    borderRadius: '1rem',
-                    cursor: 'pointer',
-                    color: 'white',
-                  }}
-                >
-                  <Users size={18} color={thread.accent} />
-                  <div>
-                    <div style={{ fontWeight: 700 }}>{thread.title}</div>
-                    <div style={{ fontSize: '0.78rem', color: '#9CA3AF' }}>{thread.subtitle}</div>
+          ) : null}
+          {visibleThreads.map((thread) => {
+            const initials = thread.title.split(' ').slice(0, 2).map(w => w[0]?.toUpperCase()).join('');
+            const isSelected = selectedThread?.key === thread.key;
+            return (
+              <button
+                key={thread.key}
+                type="button"
+                onClick={() => setSelectedThreadKey(thread.key)}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '10px 16px',
+                  borderBottom: '1px solid var(--divider)',
+                  background: isSelected ? 'var(--surface-2)' : 'transparent',
+                  borderLeft: isSelected ? '2px solid var(--ink)' : '2px solid transparent',
+                  display: 'flex',
+                  gap: 10,
+                  transition: 'all var(--t-fast)',
+                }}
+              >
+                <div style={{
+                  width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--surface-3)', border: '1px solid var(--border-2)',
+                  fontSize: 11, fontWeight: 500, color: 'var(--ink-2)',
+                }}>
+                  {initials}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row" style={{ justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{thread.title}</span>
                   </div>
-                </button>
-              ))}
-          </div>
-
-          <div>
-            <div style={{ color: '#64748B', fontSize: '0.74rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
-              Active response threads
-            </div>
-            {incidentThreads.length === 0 ? (
-              <div style={{ color: '#9CA3AF', fontSize: '0.84rem' }}>No critical contextual threads.</div>
-            ) : (
-              <div style={{ display: 'grid', gap: '0.5rem' }}>
-                {incidentThreads.map((thread) => (
-                  <button
-                    key={thread.key}
-                    type="button"
-                    onClick={() => setSelectedThreadKey(thread.key)}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '0.95rem 1rem',
-                      display: 'grid',
-                      gap: '0.3rem',
-                      backgroundColor: selectedThread?.key === thread.key ? '#1E293B' : '#0F172A',
-                      border: `1px solid ${selectedThread?.key === thread.key ? thread.accent : '#1F2937'}`,
-                      borderRadius: '1rem',
-                      cursor: 'pointer',
-                      color: 'white',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center' }}>
-                      <div style={{ fontWeight: 700 }}>{thread.title}</div>
-                      <Siren size={16} color={thread.accent} />
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: '#CBD5E1', lineHeight: 1.4 }}>{thread.subtitle}</div>
-                    <div style={{ fontSize: '0.72rem', color: thread.accent, fontWeight: 700 }}>{thread.scope}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div style={{ color: '#64748B', fontSize: '0.74rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
-              Trip threads
-            </div>
-            {tripThreads.length === 0 ? (
-              <div style={{ color: '#9CA3AF', fontSize: '0.84rem' }}>No active trip threads.</div>
-            ) : (
-              <div style={{ display: 'grid', gap: '0.5rem' }}>
-                {tripThreads.map((thread) => (
-                  <button
-                    key={thread.key}
-                    type="button"
-                    onClick={() => setSelectedThreadKey(thread.key)}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '0.95rem 1rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      backgroundColor: selectedThread?.key === thread.key ? '#1E293B' : '#0F172A',
-                      border: `1px solid ${selectedThread?.key === thread.key ? thread.accent : '#1F2937'}`,
-                      borderRadius: '1rem',
-                      cursor: 'pointer',
-                      color: 'white',
-                    }}
-                  >
-                    <Bus size={18} color={thread.accent} />
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{thread.title}</div>
-                      <div style={{ fontSize: '0.78rem', color: '#9CA3AF' }}>{thread.subtitle}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section style={{ ...panelStyle, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <MessageSquare size={18} color={selectedThread?.accent || '#38BDF8'} />
-              <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800 }}>{selectedThread?.title}</h2>
-            </div>
-            <div style={{ marginTop: '0.35rem', color: '#9CA3AF', fontSize: '0.9rem' }}>{selectedThread?.subtitle}</div>
-          </div>
-          <div style={{ padding: '0.35rem 0.65rem', borderRadius: 999, background: '#0F172A', border: '1px solid #1F2937', color: selectedThread?.accent || '#38BDF8', fontSize: '0.75rem', fontWeight: 800 }}>
-            {selectedThread?.scope}
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem' }}>
-          <div style={{ borderRadius: 16, background: '#0F172A', border: '1px solid #1E293B', padding: '0.9rem' }}>
-            <div style={{ color: '#64748B', fontSize: '0.76rem', textTransform: 'uppercase' }}>Scope</div>
-            <div style={{ marginTop: '0.3rem', color: '#F8FAFC', fontWeight: 700 }}>{selectedThread?.scope}</div>
-          </div>
-          <div style={{ borderRadius: 16, background: '#0F172A', border: '1px solid #1E293B', padding: '0.9rem' }}>
-            <div style={{ color: '#64748B', fontSize: '0.76rem', textTransform: 'uppercase' }}>Route / bus</div>
-            <div style={{ marginTop: '0.3rem', color: '#F8FAFC', fontWeight: 700 }}>{selectedThread?.context?.routeId || selectedThread?.busId || 'Fleet wide'}</div>
-          </div>
-          <div style={{ borderRadius: 16, background: '#0F172A', border: '1px solid #1E293B', padding: '0.9rem' }}>
-            <div style={{ color: '#64748B', fontSize: '0.76rem', textTransform: 'uppercase' }}>Access</div>
-            <div style={{ marginTop: '0.3rem', color: '#F8FAFC', fontWeight: 700 }}>{capabilities?.canMessageDrivers ? 'Actionable' : 'Read only'}</div>
-          </div>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.2rem', display: 'flex', flexDirection: 'column-reverse', gap: '1rem' }}>
-          {isLoading ? (
-            <div style={{ color: '#9CA3AF', textAlign: 'center' }}>Loading messages...</div>
-          ) : messages.length === 0 ? (
-            <div style={{ color: '#9CA3AF', textAlign: 'center', padding: '2rem' }}>No messages found in this scope.</div>
-          ) : (
-            messages.map((message) => {
-              const isAdmin = ['TRANSPORT_OFFICER', 'COORDINATOR'].includes(message.sender.role);
-              return (
-                <div
-                  key={message.id}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: isAdmin ? 'flex-end' : 'flex-start',
-                    gap: '0.25rem',
-                  }}
-                >
-                  <div style={{ fontSize: '0.75rem', color: '#9CA3AF', display: 'flex', gap: '0.5rem' }}>
-                    <span>{message.sender.name} ({message.sender.role})</span>
-                    <span>|</span>
-                    <span>{format(new Date(message.createdAt), 'HH:mm')}</span>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>
+                    {thread.scope === 'BROADCAST' ? 'Broadcast' : thread.scope === 'TRIP' ? `Driver · ${thread.context?.tripId?.slice(0, 8) ?? ''}` : thread.scope}
                   </div>
-                  <div
-                    style={{
-                      padding: '0.8rem 1rem',
-                      backgroundColor: isAdmin ? '#2563EB' : '#374151',
-                      color: 'white',
-                      borderRadius: '0.8rem',
-                      borderTopRightRadius: isAdmin ? 0 : '0.8rem',
-                      borderTopLeftRadius: isAdmin ? '0.8rem' : 0,
-                      maxWidth: '78%',
-                      wordBreak: 'break-word',
-                      border: message.priority === 'URGENT' ? '1px solid #EF4444' : '1px solid transparent',
-                    }}
-                  >
-                    {message.priority === 'URGENT' && <AlertCircle size={14} color="#FCA5A5" style={{ display: 'inline', marginRight: '6px' }} />}
-                    {message.body}
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                    {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
+                  <div style={{ fontSize: 11, color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {thread.subtitle}
                   </div>
                 </div>
-              );
-            })
-          )}
+              </button>
+            );
+          })}
         </div>
+      </div>
 
-        <div style={{ borderTop: '1px solid #1F2937', paddingTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-          <textarea
-            value={inputText}
-            onChange={(event) => setInputText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                void sendMessage();
-              }
-            }}
-            placeholder={capabilities?.canMessageDrivers ? 'Type a contextual operations update...' : 'Read-only for your role'}
-            disabled={!capabilities?.canMessageDrivers}
-            rows={4}
-            style={{
-              resize: 'vertical',
-              padding: '0.85rem 1rem',
-              backgroundColor: '#020617',
-              color: 'white',
-              border: '1px solid #334155',
-              borderRadius: '1rem',
-              outline: 'none',
-            }}
-          />
-
-          {sendError && (
-            <div style={{ borderRadius: 14, background: 'rgba(127, 29, 29, 0.45)', border: '1px solid rgba(248, 113, 113, 0.35)', color: '#FCA5A5', padding: '0.85rem 0.95rem' }}>
-              {sendError}
+      {/* Center — Chat area */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {/* Chat header */}
+        <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--divider)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div className="row gap-8">
+              <span style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500 }}>
+                {selectedThread?.title ?? 'Conversation'}
+              </span>
+              {selectedThread?.scope !== 'BROADCAST' && (
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  {selectedThread?.scope === 'TRIP' ? 'Driver' : selectedThread?.scope} · trip {selectedThread?.context?.tripId?.slice(0, 8) ?? ''}
+                </span>
+              )}
             </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() => void sendMessage()}
-            disabled={sendContextMessage.isPending || !capabilities?.canMessageDrivers || !inputText.trim()}
-            style={{
-              padding: '0.9rem 1rem',
-              backgroundColor: !capabilities?.canMessageDrivers || !inputText.trim() ? '#334155' : '#3B82F6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '1rem',
-              cursor: !capabilities?.canMessageDrivers || !inputText.trim() ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.5rem',
-              fontWeight: 800,
-            }}
-          >
-            <span>Send contextual update</span>
-            <Send size={16} />
-          </button>
+            {lastMessageByThread ? (
+              <div className="row gap-6" style={{ marginTop: 2 }}>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  Last message {format(new Date(lastMessageByThread.createdAt), 'HH:mm')}
+                </span>
+              </div>
+            ) : null}
+          </div>
+          <div className="row gap-8">
+            {selectedThread?.tripId ? (
+              <button className="btn sm" type="button" onClick={handleOpenTrip}>Open trip</button>
+            ) : null}
+          </div>
         </div>
-      </section>
+
+        {/* Messages */}
+        <div className="scroll" style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {isLoading ? (
+            <div className="muted" style={{ textAlign: 'center', paddingTop: 40 }}>Loading messages…</div>
+          ) : messages.length === 0 ? (
+            <div className="muted" style={{ textAlign: 'center', paddingTop: 40 }}>No messages in this thread yet.</div>
+          ) : (
+            messageGroups.map((group) => (
+              <React.Fragment key={group.key}>
+                <div style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 11, padding: '8px 0' }}>{group.label}</div>
+                {group.items.map((message) => {
+                  const isAdmin = ['TRANSPORT_OFFICER', 'COORDINATOR'].includes(message.sender.role);
+                  return (
+                    <div key={message.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdmin ? 'flex-end' : 'flex-start', gap: 2 }}>
+                      <div
+                        style={{
+                          maxWidth: '65%',
+                          padding: '10px 14px',
+                          borderRadius: isAdmin ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                          background: isAdmin ? 'var(--ink)' : 'var(--surface-2)',
+                          color: isAdmin ? '#fff' : 'var(--ink)',
+                          border: isAdmin ? 'none' : '1px solid var(--border)',
+                          fontSize: 13,
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {message.body}
+                      </div>
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--muted)' }}>
+                        {format(new Date(message.createdAt), 'HH:mm')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            ))
+          )}
+        </div>
+
+        {/* Quick replies + compose */}
+        <div style={{ borderTop: '1px solid var(--divider)', padding: '10px 20px' }}>
+          <div className="row gap-6" style={{ marginBottom: 10 }}>
+            {['Acknowledge', 'ETA holds', 'Need ETA', 'Pull over safely'].map(chip => (
+              <button key={chip} type="button" className="btn sm" onClick={() => setInputText(chip)}>{chip}</button>
+            ))}
+          </div>
+          <div className="row gap-10">
+            <input
+              value={inputText}
+              onChange={(event) => setInputText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendMessage();
+                }
+              }}
+              placeholder="Reply to driver…"
+              disabled={!capabilities?.canMessageDrivers}
+              style={{
+                flex: 1, padding: '10px 14px',
+                border: '1px solid var(--border-2)', borderRadius: 'var(--r-pill)',
+                background: 'var(--surface-2)', outline: 'none', fontSize: 13,
+              }}
+            />
+            <button className="btn primary sm" type="button" disabled={sendContextMessage.isPending || !capabilities?.canMessageDrivers || !inputText.trim()} onClick={() => void sendMessage()}>
+              <Icon name="send" size={11} /> Send
+            </button>
+          </div>
+          {sendError ? <div className="pill pill--err" style={{ marginTop: 6, width: 'fit-content', textTransform: 'none', fontSize: 11 }}>{sendError}</div> : null}
+        </div>
+      </div>
+
+      {/* Right sidebar — Context */}
+      <div style={{ width: 220, flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--surface)', padding: '16px 14px' }}>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Context</div>
+        <div style={{ display: 'grid', gap: 10, fontSize: 12 }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="muted">Trip</span>
+            <span className="mono" style={{ fontSize: 11 }}>{selectedThread?.tripId?.slice(0, 8) ?? '—'}</span>
+          </div>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="muted">Route</span>
+            <span style={{ fontSize: 11, textAlign: 'right', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {selectedTripState?.routeName ?? selectedThread?.routeId?.slice(0, 8) ?? '—'}
+            </span>
+          </div>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="muted">Bus</span>
+            <span className="mono" style={{ fontSize: 11 }}>{selectedTripState?.busNumber ?? selectedThread?.busId?.slice(0, 8) ?? '—'}</span>
+          </div>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="muted">Onboard</span>
+            <span className="mono" style={{ fontSize: 11 }}>
+              {selectedTripState ? `${selectedTripState.boardedCount}/${selectedTripState.expectedCount}` : '—'}
+            </span>
+          </div>
+          {selectedTripState?.gpsStatus ? (
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <span className="muted">GPS</span>
+              <span className="mono" style={{ fontSize: 11 }}>{selectedTripState.gpsStatus}</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 };

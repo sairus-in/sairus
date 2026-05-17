@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminRouteSummary, AdminStopCatalogItem } from 'shared';
+import { ConfirmWithImpactModal } from '../../components/shared/ConfirmWithImpactModal';
+import { KPIBlock, SectionCard, StateBadge } from '../../components/design/primitives';
+import { Icon } from '../../components/design/Icon';
 import { api } from '../../lib/api.client';
 import { extractApiError } from '../../lib/api-error';
-import { ConfirmWithImpactModal } from '../../components/shared/ConfirmWithImpactModal';
-import { ArrowLeft, GripVertical, Plus, Save, Trash2 } from 'lucide-react';
 
 const DAY_OPTIONS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
 
@@ -54,6 +55,27 @@ const defaultStopForm: StopFormState = {
   lat: '',
   lon: '',
 };
+
+const fieldStyle: React.CSSProperties = {
+  width: '100%',
+  borderRadius: 12,
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
+  padding: '10px 12px',
+  outline: 'none',
+};
+
+const dayPillStyle = (active: boolean): React.CSSProperties => ({
+  borderRadius: 999,
+  border: `1px solid ${active ? 'var(--ink)' : 'var(--border)'}`,
+  background: active ? 'var(--ink)' : 'var(--surface)',
+  color: active ? 'var(--accent-ink)' : 'var(--muted)',
+  padding: '7px 11px',
+  fontSize: 11,
+  fontWeight: 500,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+});
 
 export const RouteEditor: React.FC = () => {
   const queryClient = useQueryClient();
@@ -240,269 +262,313 @@ export const RouteEditor: React.FC = () => {
     );
   };
 
+  const routesList = routes ?? [];
+  const activeRoutes = routesList.filter((route) => route.isActive).length;
+  const totalStops = routesList.reduce((sum, route) => sum + (route.stops?.length ?? 0), 0);
+
   if (!selectedRouteId) {
     return (
-      <div style={{ height: '100%', display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) 360px', gap: '1rem' }}>
-        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: '8px', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '1.5rem', borderBottom: '1px solid #E5E7EB' }}>
-            <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 'bold' }}>Route Management</h1>
-            <p style={{ margin: '0.5rem 0 0', color: '#6B7280', fontSize: '0.875rem' }}>Create routes, manage metadata, and edit stop sequences.</p>
-          </div>
-          <div style={{ flex: 1, overflow: 'auto', padding: '1rem' }}>
-            {loadingRoutes ? (
-              <p style={{ textAlign: 'center', color: '#9CA3AF', padding: '2rem' }}>Loading routes...</p>
-            ) : (
-              <div style={{ display: 'grid', gap: '0.75rem' }}>
-                {(routes || []).map((route) => (
-                  <button
-                    key={route.id}
-                    onClick={() => setSelectedRouteId(route.id)}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '1rem 1.25rem', background: 'white', border: '1px solid #E5E7EB',
-                      borderRadius: '8px', cursor: 'pointer', textAlign: 'left', width: '100%',
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{route.name}</div>
-                      <div style={{ color: '#6B7280', fontSize: '0.85rem', marginTop: '0.25rem' }}>{route.area} | {route.stops?.length || 0} stops</div>
-                      <div style={{ color: '#94A3B8', fontSize: '0.78rem', marginTop: '0.2rem' }}>{(route.activeDays || []).join(', ')}</div>
-                    </div>
-                    <span style={{ color: route.isActive ? '#059669' : '#DC2626', fontSize: '0.8rem', fontWeight: 600 }}>
-                      {route.isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+      <div style={{ display: 'grid', gap: 16, minHeight: '100%' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 16,
+            alignItems: 'flex-start',
+            padding: 20,
+            border: '1px solid var(--border)',
+            borderRadius: 20,
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,245,242,0.9))',
+          }}
+        >
+          <div>
+            <div className="mono" style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>
+              Data Console
+            </div>
+            <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 500, letterSpacing: '-0.03em' }}>
+              Routes
+            </h1>
+            <div style={{ marginTop: 6, color: 'var(--muted)', maxWidth: 720 }}>
+              Route metadata and stop sequences are still wired to the same route contract, including optimistic concurrency on stop updates.
+            </div>
           </div>
         </div>
 
-        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: '8px', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E5E7EB' }}>
-            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Create Route</h2>
-            <div style={{ color: '#6B7280', fontSize: '0.82rem', marginTop: '0.25rem' }}>Define route metadata before editing stops.</div>
-          </div>
-          <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: '0.85rem' }}>
-            <label style={{ display: 'grid', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Route Name</span>
-              <input value={createRouteForm.name} onChange={(event) => setCreateRouteForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-            </label>
-            <label style={{ display: 'grid', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Area</span>
-              <input value={createRouteForm.area} onChange={(event) => setCreateRouteForm((current) => ({ ...current, area: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-            </label>
-            <div style={{ display: 'grid', gap: '0.4rem' }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Active Days</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                {DAY_OPTIONS.map((day) => (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+          <KPIBlock label="Routes" value={routesList.length} sub="All route templates" spark={[1, 2, 3, 3, Math.max(routesList.length, 1)]} />
+          <KPIBlock label="Active" value={activeRoutes} sub="Currently enabled routes" accent="var(--ok)" spark={[1, 1, 2, 2, Math.max(activeRoutes, 1)]} />
+          <KPIBlock label="Stops" value={totalStops} sub="Total attached stop points" accent="var(--info)" spark={[4, 8, 10, 12, Math.max(totalStops, 1)]} />
+          <KPIBlock label="Catalog" value={stopCatalog.length} sub="Reusable stop definitions" accent="var(--warn)" spark={[2, 4, 6, 7, Math.max(stopCatalog.length, 1)]} />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) 360px', gap: 16 }}>
+          <SectionCard title="Route Templates" subtitle={loadingRoutes ? 'Loading routes' : `${routesList.length} templates available`}>
+            <div className="scroll" style={{ display: 'grid', gap: 10, maxHeight: 'calc(100vh - 410px)', paddingRight: 4 }}>
+              {loadingRoutes ? (
+                <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--muted)' }}>Loading routes…</div>
+              ) : (
+                routesList.map((route) => (
                   <button
-                    key={day}
+                    key={route.id}
                     type="button"
-                    onClick={() => toggleDays(day, 'create')}
+                    onClick={() => setSelectedRouteId(route.id)}
                     style={{
-                      border: '1px solid #CBD5E1',
-                      borderRadius: '9999px',
-                      padding: '0.4rem 0.7rem',
-                      background: createRouteForm.activeDays.includes(day) ? '#DBEAFE' : 'white',
-                      color: createRouteForm.activeDays.includes(day) ? '#1D4ED8' : '#475569',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '0.78rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      alignItems: 'center',
+                      padding: 14,
+                      borderRadius: 16,
+                      border: '1px solid var(--border)',
+                      background: 'var(--surface)',
+                      textAlign: 'left',
                     }}
                   >
+                    <div>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{route.id.slice(0, 8)}</div>
+                      <div style={{ fontWeight: 500 }}>{route.name}</div>
+                      <div style={{ marginTop: 2, color: 'var(--muted)', fontSize: 12 }}>
+                        {route.area} · {route.stops?.length || 0} stops · {(route.activeDays || []).join(', ')}
+                      </div>
+                    </div>
+                    <StateBadge state={route.isActive ? 'LIVE' : 'OFFLINE'} label={route.isActive ? 'Active' : 'Inactive'} />
+                  </button>
+                ))
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Create Route" subtitle="Define metadata first, then edit the stop sequence">
+            <div style={{ display: 'grid', gap: 12 }}>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Route Name</span>
+                <input value={createRouteForm.name} onChange={(event) => setCreateRouteForm((current) => ({ ...current, name: event.target.value }))} style={fieldStyle} />
+              </label>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Area</span>
+                <input value={createRouteForm.area} onChange={(event) => setCreateRouteForm((current) => ({ ...current, area: event.target.value }))} style={fieldStyle} />
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {DAY_OPTIONS.map((day) => (
+                  <button key={day} type="button" onClick={() => toggleDays(day, 'create')} style={dayPillStyle(createRouteForm.activeDays.includes(day))}>
                     {day}
                   </button>
                 ))}
               </div>
+              {metaError ? (
+                <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
+                  {metaError}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => createRouteMutation.mutate(createRouteForm)}
+                disabled={createRouteMutation.isPending || !createRouteForm.name.trim() || !createRouteForm.area.trim() || createRouteForm.activeDays.length === 0}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '11px 16px', fontWeight: 500 }}
+              >
+                <Icon name="plus" size={12} />
+                Create Route
+              </button>
             </div>
-            {metaError && (
-              <div style={{ padding: '0.8rem', borderRadius: '6px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', fontSize: '0.85rem' }}>
-                {metaError}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => createRouteMutation.mutate(createRouteForm)}
-              disabled={createRouteMutation.isPending || !createRouteForm.name.trim() || !createRouteForm.area.trim() || createRouteForm.activeDays.length === 0}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', border: 'none', borderRadius: '8px', background: '#2563EB', color: 'white', padding: '0.8rem 1rem', fontWeight: 700, cursor: 'pointer' }}
-            >
-              <Plus size={16} /> Create Route
-            </button>
-          </div>
+          </SectionCard>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <div style={{ padding: '1rem 1.5rem', border: '1px solid #E5E7EB', borderRadius: '8px', background: 'white', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <button onClick={() => setSelectedRouteId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#6B7280' }}>
-          <ArrowLeft size={20} />
-        </button>
-        <div style={{ flex: 1 }}>
-          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 'bold' }}>{routeDetail?.name || 'Loading...'}</h2>
-          <span style={{ color: '#6B7280', fontSize: '0.8rem' }}>{routeDetail?.area}</span>
+    <div style={{ display: 'grid', gap: 16, minHeight: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 16,
+          alignItems: 'flex-start',
+          padding: 20,
+          border: '1px solid var(--border)',
+          borderRadius: 20,
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,245,242,0.9))',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <button
+            type="button"
+            onClick={() => setSelectedRouteId(null)}
+            style={{ width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)' }}
+          >
+            <Icon name="chevL" size={14} />
+          </button>
+          <div>
+            <div className="mono" style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>
+              Route Detail
+            </div>
+            <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 500, letterSpacing: '-0.03em' }}>
+              {routeDetail?.name || 'Loading…'}
+            </h1>
+            <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+              {routeDetail?.area || '—'} · {(routeDetail?.activeDays || []).join(', ')}
+            </div>
+          </div>
         </div>
-        <button
-          onClick={() => updateRouteMutation.mutate()}
-          disabled={updateRouteMutation.isPending || routeForm.activeDays.length === 0}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.55rem 1rem', background: '#111827', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
-        >
-          <Save size={16} /> Save Metadata
-        </button>
-        <button
-          onClick={() => setShowConfirm(true)}
-          disabled={editStops.length === 0}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.55rem 1rem', background: '#2563EB', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
-        >
-          <Save size={16} /> Save Sequence
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => updateRouteMutation.mutate()}
+            disabled={updateRouteMutation.isPending || routeForm.activeDays.length === 0}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)', padding: '10px 16px', fontWeight: 500 }}
+          >
+            <Icon name="check" size={12} />
+            Save Metadata
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowConfirm(true)}
+            disabled={editStops.length === 0}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '10px 16px', fontWeight: 500 }}
+          >
+            <Icon name="check" size={12} />
+            Save Sequence
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) 380px', gap: '1rem', flex: 1, minHeight: 0 }}>
-        <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E5E7EB', display: 'grid', gap: '0.8rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <label style={{ display: 'grid', gap: '0.35rem' }}>
-                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Route Name</span>
-                <input value={routeForm.name} onChange={(event) => setRouteForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-              </label>
-              <label style={{ display: 'grid', gap: '0.35rem' }}>
-                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Area</span>
-                <input value={routeForm.area} onChange={(event) => setRouteForm((current) => ({ ...current, area: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-              </label>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-              {DAY_OPTIONS.map((day) => (
-                <button
-                  key={day}
-                  type="button"
-                  onClick={() => toggleDays(day, 'edit')}
-                  style={{
-                    border: '1px solid #CBD5E1',
-                    borderRadius: '9999px',
-                    padding: '0.4rem 0.7rem',
-                    background: routeForm.activeDays.includes(day) ? '#DBEAFE' : 'white',
-                    color: routeForm.activeDays.includes(day) ? '#1D4ED8' : '#475569',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '0.78rem',
-                  }}
-                >
-                  {day}
-                </button>
-              ))}
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', color: '#475569', fontSize: '0.84rem' }}>
-              <input type="checkbox" checked={routeForm.isActive} onChange={(event) => setRouteForm((current) => ({ ...current, isActive: event.target.checked }))} />
-              Route is active
-            </label>
-            {metaError && (
-              <div style={{ padding: '0.8rem', borderRadius: '6px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', fontSize: '0.85rem' }}>
-                {metaError}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.45fr) 380px', gap: 16, minHeight: 0 }}>
+        <div style={{ display: 'grid', gap: 16, minHeight: 0 }}>
+          <SectionCard title="Route Metadata" subtitle="Name, area, active days, and publishing state">
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Route Name</span>
+                  <input value={routeForm.name} onChange={(event) => setRouteForm((current) => ({ ...current, name: event.target.value }))} style={fieldStyle} />
+                </label>
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Area</span>
+                  <input value={routeForm.area} onChange={(event) => setRouteForm((current) => ({ ...current, area: event.target.value }))} style={fieldStyle} />
+                </label>
               </div>
-            )}
-          </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {DAY_OPTIONS.map((day) => (
+                  <button key={day} type="button" onClick={() => toggleDays(day, 'edit')} style={dayPillStyle(routeForm.activeDays.includes(day))}>
+                    {day}
+                  </button>
+                ))}
+              </div>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--muted)' }}>
+                <input type="checkbox" checked={routeForm.isActive} onChange={(event) => setRouteForm((current) => ({ ...current, isActive: event.target.checked }))} />
+                Route is active
+              </label>
+              {metaError ? (
+                <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
+                  {metaError}
+                </div>
+              ) : null}
+            </div>
+          </SectionCard>
 
-          <div style={{ flex: 1, overflow: 'auto', padding: '1rem 1.5rem' }}>
-            {saveError && (
-              <div style={{ marginBottom: '1rem', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#B91C1C' }}>
+          <SectionCard title="Stop Sequence" subtitle="Drag to reorder, edit timing per stop">
+            {saveError ? (
+              <div style={{ marginBottom: 12, padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
                 {saveError}
               </div>
-            )}
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
+            ) : null}
+            <div className="scroll" style={{ display: 'grid', gap: 8, maxHeight: 'calc(100vh - 470px)', paddingRight: 4 }}>
               {editStops.map((stop, idx) => (
                 <div
                   key={stop.stopId}
                   draggable
                   onDragStart={() => setDragIdx(idx)}
                   onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => { if (dragIdx !== null && dragIdx !== idx) moveStop(dragIdx, idx); setDragIdx(null); }}
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', background: dragIdx === idx ? '#EFF6FF' : 'white', border: '1px solid #E5E7EB', borderRadius: '8px', cursor: 'grab' }}
+                  onDrop={() => {
+                    if (dragIdx !== null && dragIdx !== idx) moveStop(dragIdx, idx);
+                    setDragIdx(null);
+                  }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '28px 40px minmax(0, 1fr) auto auto 32px',
+                    gap: 10,
+                    alignItems: 'center',
+                    padding: 12,
+                    borderRadius: 16,
+                    border: `1px solid ${dragIdx === idx ? 'var(--ink)' : 'var(--border)'}`,
+                    background: dragIdx === idx ? 'var(--surface-2)' : 'var(--surface)',
+                  }}
                 >
-                  <GripVertical size={18} color="#9CA3AF" style={{ flexShrink: 0 }} />
-                  <span style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem', flexShrink: 0 }}>
-                    {stop.sequence}
-                  </span>
-                  <div style={{ flex: 1, fontWeight: 500 }}>{stop.stopName}</div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.85rem' }}>
-                    <label style={{ color: '#6B7280' }}>AM</label>
-                    <input type="time" value={minutesToTime(stop.morningTime)} onChange={(event) => updateStopTime(idx, 'morningTime', event.target.value)} style={{ padding: '0.25rem 0.5rem', border: '1px solid #D1D5DB', borderRadius: '4px', fontSize: '0.85rem' }} />
-                    <label style={{ color: '#6B7280' }}>PM</label>
-                    <input type="time" value={minutesToTime(stop.returnTime)} onChange={(event) => updateStopTime(idx, 'returnTime', event.target.value)} style={{ padding: '0.25rem 0.5rem', border: '1px solid #D1D5DB', borderRadius: '4px', fontSize: '0.85rem' }} />
+                  <span style={{ color: 'var(--muted)' }}>⋮⋮</span>
+                  <span className="mono" style={{ width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: 'var(--surface-2)' }}>{stop.sequence}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 500 }}>{stop.stopName}</div>
                   </div>
-                  <button onClick={() => removeStop(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#EF4444' }}>
-                    <Trash2 size={16} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="mono" style={{ color: 'var(--muted)' }}>AM</span>
+                    <input type="time" value={minutesToTime(stop.morningTime)} onChange={(event) => updateStopTime(idx, 'morningTime', event.target.value)} style={{ ...fieldStyle, width: 120 }} />
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="mono" style={{ color: 'var(--muted)' }}>PM</span>
+                    <input type="time" value={minutesToTime(stop.returnTime)} onChange={(event) => updateStopTime(idx, 'returnTime', event.target.value)} style={{ ...fieldStyle, width: 120 }} />
+                  </label>
+                  <button type="button" onClick={() => removeStop(idx)} style={{ width: 32, height: 32, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                    <Icon name="x" size={12} />
                   </button>
                 </div>
               ))}
+              {editStops.length === 0 ? (
+                <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--muted)' }}>No stops configured for this route yet.</div>
+              ) : null}
             </div>
-            {editStops.length === 0 && (
-              <p style={{ textAlign: 'center', color: '#9CA3AF', padding: '3rem 0' }}>No stops configured for this route yet. Add stops from the catalog.</p>
-            )}
-          </div>
+          </SectionCard>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: 0 }}>
-          <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E5E7EB' }}>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Stop Catalog</h3>
-              <div style={{ color: '#6B7280', fontSize: '0.82rem', marginTop: '0.25rem' }}>Attach existing stops to this route.</div>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: '1rem', display: 'grid', gap: '0.5rem' }}>
+        <div style={{ display: 'grid', gap: 16 }}>
+          <SectionCard title="Stop Catalog" subtitle="Attach existing stops to this route">
+            <div className="scroll" style={{ display: 'grid', gap: 8, maxHeight: 'calc(100vh - 530px)', paddingRight: 4 }}>
               {availableStops.map((stop) => (
                 <button
                   key={stop.id}
                   type="button"
                   onClick={() => appendStop(stop)}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #E5E7EB', borderRadius: '8px', background: 'white', padding: '0.75rem 0.9rem', cursor: 'pointer', textAlign: 'left' }}
+                  style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', padding: 12, borderRadius: 16, border: '1px solid var(--border)', background: 'var(--surface)', textAlign: 'left' }}
                 >
                   <div>
-                    <div style={{ fontWeight: 600 }}>{stop.name}</div>
-                    <div style={{ color: '#6B7280', fontSize: '0.8rem' }}>{stop.area || 'No area'} | {stop.lat}, {stop.lon}</div>
+                    <div style={{ fontWeight: 500 }}>{stop.name}</div>
+                    <div style={{ marginTop: 2, color: 'var(--muted)', fontSize: 12 }}>{stop.area || 'No area'} · {stop.lat}, {stop.lon}</div>
                   </div>
-                  <Plus size={16} color="#2563EB" />
+                  <Icon name="plus" size={12} />
                 </button>
               ))}
-              {availableStops.length === 0 && (
-                <div style={{ color: '#9CA3AF', fontSize: '0.86rem' }}>All known stops are already attached to this route.</div>
-              )}
+              {availableStops.length === 0 ? (
+                <div style={{ color: 'var(--muted)' }}>All known stops are already attached to this route.</div>
+              ) : null}
             </div>
-          </div>
+          </SectionCard>
 
-          <div style={{ background: 'white', border: '1px solid #E5E7EB', borderRadius: '8px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E5E7EB' }}>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Create Stop</h3>
-              <div style={{ color: '#6B7280', fontSize: '0.82rem', marginTop: '0.25rem' }}>Add a new stop to the shared catalog and this route.</div>
-            </div>
-            <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: '0.75rem' }}>
-              <input placeholder="Stop name" value={stopForm.name} onChange={(event) => setStopForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-              <input placeholder="Area" value={stopForm.area} onChange={(event) => setStopForm((current) => ({ ...current, area: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <input placeholder="Latitude" value={stopForm.lat} onChange={(event) => setStopForm((current) => ({ ...current, lat: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-                <input placeholder="Longitude" value={stopForm.lon} onChange={(event) => setStopForm((current) => ({ ...current, lon: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
+          <SectionCard title="Create Stop" subtitle="Add a new stop to the shared catalog">
+            <div style={{ display: 'grid', gap: 12 }}>
+              <input placeholder="Stop name" value={stopForm.name} onChange={(event) => setStopForm((current) => ({ ...current, name: event.target.value }))} style={fieldStyle} />
+              <input placeholder="Area" value={stopForm.area} onChange={(event) => setStopForm((current) => ({ ...current, area: event.target.value }))} style={fieldStyle} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <input placeholder="Latitude" value={stopForm.lat} onChange={(event) => setStopForm((current) => ({ ...current, lat: event.target.value }))} style={fieldStyle} />
+                <input placeholder="Longitude" value={stopForm.lon} onChange={(event) => setStopForm((current) => ({ ...current, lon: event.target.value }))} style={fieldStyle} />
               </div>
-              {catalogError && (
-                <div style={{ padding: '0.8rem', borderRadius: '6px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', fontSize: '0.85rem' }}>
+              {catalogError ? (
+                <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
                   {catalogError}
                 </div>
-              )}
+              ) : null}
               <button
                 type="button"
                 onClick={() => createStopMutation.mutate()}
                 disabled={createStopMutation.isPending || !stopForm.name.trim() || !stopForm.lat.trim() || !stopForm.lon.trim()}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', border: 'none', borderRadius: '8px', background: '#111827', color: 'white', padding: '0.8rem 1rem', fontWeight: 700, cursor: 'pointer' }}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '11px 16px', fontWeight: 500 }}
               >
-                <Plus size={16} /> Create Stop
+                <Icon name="plus" size={12} />
+                Create Stop
               </button>
             </div>
-          </div>
+          </SectionCard>
         </div>
       </div>
 
-      {showConfirm && (
+      {showConfirm ? (
         <ConfirmWithImpactModal
           title="Update Route Stops"
           description={`You are about to update the stop sequence for "${routeDetail?.name}". This will replace all current stop configurations.`}
@@ -516,7 +582,7 @@ export const RouteEditor: React.FC = () => {
           onConfirm={confirmSave}
           onCancel={() => setShowConfirm(false)}
         />
-      )}
+      ) : null}
     </div>
   );
 };

@@ -4,11 +4,18 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { studentService } from '../../services/student.service';
-import { colors, typography, spacing } from '../../constants/theme';
+import { typography } from '../../constants/theme';
 import { t } from '../../i18n';
 import { ErrorState } from '../../components/shared/ErrorState';
 
 type VerifyState = 'loading' | 'success' | 'error';
+
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  spinner: '#356C8F',
+};
 
 export default function VerifyArrivalScreen() {
   const router = useRouter();
@@ -33,17 +40,13 @@ export default function VerifyArrivalScreen() {
           lon: location.coords.longitude,
           method: 'PUSH_NOTIFICATION',
         });
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
         setState('success');
         timeoutId = setTimeout(() => {
           router.back();
         }, 1500);
       } catch (err) {
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
         setState('error');
         setError(err instanceof Error ? err.message : 'Arrival verification failed.');
       }
@@ -52,31 +55,40 @@ export default function VerifyArrivalScreen() {
 
     return () => {
       cancelled = true;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [params.tripId, router]);
 
   if (state === 'error') {
-    return <ErrorState message={error ?? t('common.error')} onRetry={() => router.replace(`/(student)/verify-arrival?tripId=${params.tripId}`)} />;
+    return (
+      <ErrorState
+        message={error ?? t('common.error')}
+        onRetry={() => router.replace(`/(student)/verify-arrival?tripId=${params.tripId}`)}
+      />
+    );
   }
 
   return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color={colors.brand.primary} />
-      <Text style={styles.text}>{state === 'success' ? 'Arrival verified.' : t('arrival.verifying')}</Text>
+    <View style={s.container}>
+      <ActivityIndicator size="large" color={C.spinner} />
+      <Text style={s.text}>
+        {state === 'success' ? 'Arrival verified.' : t('arrival.verifying')}
+      </Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: {
-    flex: 1, justifyContent: 'center', alignItems: 'center',
-    backgroundColor: colors.surface,
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: C.bg,
+    gap: 16,
   },
   text: {
-    fontFamily: typography.family, fontSize: typography.sizes.h3,
-    color: colors.text.secondary, marginTop: spacing.lg,
+    fontFamily: typography.family,
+    fontSize: 16,
+    color: C.muted,
   },
 });

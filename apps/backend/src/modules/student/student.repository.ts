@@ -308,6 +308,17 @@ export async function getYesterdayAbsent(userId: string, yesterdayDate: string) 
   }
 }
 
+/**
+ * Get ordered route stops for a route (for route geometry)
+ */
+export async function getRouteStopsOrdered(routeId: string) {
+  return prisma.routeStop.findMany({
+    where: { routeId, isActive: true },
+    include: { stop: true },
+    orderBy: { sequence: 'asc' },
+  });
+}
+
 export const studentRepository = {
   getStudentProfile,
   getRouteAssignmentToday,
@@ -320,4 +331,5 @@ export const studentRepository = {
   getAttendanceHistorySummary,
   getPendingCorrectionsCount,
   getYesterdayAbsent,
+  getRouteStopsOrdered,
 };

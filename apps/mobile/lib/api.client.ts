@@ -17,6 +17,7 @@ import { getFreshFirebaseToken } from './phone-auth';
 import { clearMobileSession } from './session';
 import { config } from './config';
 import { getAccessToken, getDeviceId } from './session-storage';
+import { devMockAdapter } from './dev-api-mock';
 
 type MobileRequestConfig = InternalAxiosRequestConfig & {
   skipBootstrapLock?: boolean;
@@ -93,6 +94,13 @@ api.interceptors.request.use(async (reqConfig) => {
     requestConfig.headers['x-device-id'] = deviceId;
   }
 
+  // DEV ONLY: replace the HTTP adapter with a local mock when a dev_token_* is
+  // active. The mock returns realistic envelope-wrapped responses so parseEnvelope
+  // and the driver-service data-access patterns both work without a running backend.
+  if (__DEV__ && token?.startsWith('dev_token_')) {
+    requestConfig.adapter = devMockAdapter as unknown as typeof requestConfig.adapter;
+  }
+
   return requestConfig;
 });
 
@@ -142,6 +150,22 @@ api.interceptors.response.use(
     }
 
     const isAuthEndpoint = originalConfig?.url?.includes('/v1/auth/');
+    const isDevToken = __DEV__ && useAuthStore.getState().token?.startsWith('dev_token_');
+
+    if (isDevToken) {
+      // Dev bypass: never refresh or clear session on auth errors — let screens show their error state
+      const parsedDevError = ApiErrorSchema.safeParse(error.response.data);
+      if (parsedDevError.success) {
+        return Promise.reject(new ApiError(
+          parsedDevError.data.error,
+          status ?? 401,
+          parsedDevError.data.details,
+          parsedDevError.data.message,
+        ));
+      }
+      return Promise.reject(new ApiError('DEV_TOKEN_REJECTED', status ?? 401));
+    }
+
     if (status === 401 && originalConfig && !originalConfig._retried && !isAuthEndpoint) {
       originalConfig._retried = true;
 

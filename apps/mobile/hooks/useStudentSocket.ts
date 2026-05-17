@@ -58,7 +58,9 @@ export const useStudentSocket = ({ tripId, busId, routeId }: StudentSocketOption
   const token = useAuth((state) => state.token);
 
   useEffect(() => {
-    if (!token) {
+    // DEV ONLY: skip real socket connection when a dev_token_* is active.
+    // The student home data comes from the mock API adapter instead.
+    if (!token || (__DEV__ && token.startsWith('dev_token_'))) {
       return;
     }
 
@@ -127,6 +129,8 @@ export const useStudentSocket = ({ tripId, busId, routeId }: StudentSocketOption
                 busId: event.busId,
                 canCheckIn: current.features.canCheckIn,
                 busEta: current.screenState.status === 'trip_active' ? current.screenState.busEta : null,
+                distanceRemainingM:
+                  current.screenState.status === 'trip_active' ? current.screenState.distanceRemainingM : null,
               },
           meta: {
             ...current.meta,

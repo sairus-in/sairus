@@ -63,6 +63,7 @@ const fixture: StudentHomeResponse = {
       yesterdayDate: null,
       substituteAssigned: false,
     },
+    routeGeometry: null,
   },
   features: {
     hasAssignment: true,

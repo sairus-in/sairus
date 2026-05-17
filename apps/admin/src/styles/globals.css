@@ -1,0 +1,236 @@
+/* ============================================================
+   FleetOps — Global resets, utilities and animation keyframes
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root {
+  width: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ---------- Utility classes ---------- */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+}
+
+.gap-4  { gap: 4px; }
+.gap-6  { gap: 6px; }
+.gap-8  { gap: 8px; }
+.gap-10 { gap: 10px; }
+.gap-12 { gap: 12px; }
+.gap-14 { gap: 14px; }
+.gap-16 { gap: 16px; }
+
+.hr {
+  height: 1px;
+  background: var(--divider);
+  border: none;
+  margin: 0;
+}
+
+/* ---------- Scrollbar ---------- */
+.scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 4px;
+}
+
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--border-3);
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   Keyframes — matching the design handoff exactly
+   ============================================================ */
+
+/* Pulse for status dots */
+@keyframes fleetops-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.4);
+  }
+}
+
+/* Standard fade + slight upward slide */
+@keyframes fleetops-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Soft opacity-only fade */
+@keyframes fleetops-fade-soft {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Right-slide for live event items */
+@keyframes fleetops-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Nav rail active indicator slide-in */
+@keyframes fleetops-slide-in {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: 18px;
+    opacity: 1;
+  }
+}
+
+/* Skeleton shimmer */
+@keyframes fleetops-skel {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+/* ---------- Animation utility classes ---------- */
+.fade-in {
+  animation: fleetops-fade-in 320ms var(--ease-out) both;
+}
+
+.fade-in-soft {
+  animation: fleetops-fade-soft 280ms var(--ease-out) both;
+}
+
+/* Stagger: children of .stagger get sequentially delayed fade-in */
+.stagger > * {
+  animation: fleetops-fade-in 320ms var(--ease-out) both;
+}
+.stagger > *:nth-child(1)  { animation-delay: 0ms; }
+.stagger > *:nth-child(2)  { animation-delay: 40ms; }
+.stagger > *:nth-child(3)  { animation-delay: 80ms; }
+.stagger > *:nth-child(4)  { animation-delay: 120ms; }
+.stagger > *:nth-child(5)  { animation-delay: 160ms; }
+.stagger > *:nth-child(6)  { animation-delay: 200ms; }
+.stagger > *:nth-child(7)  { animation-delay: 240ms; }
+.stagger > *:nth-child(8)  { animation-delay: 280ms; }
+.stagger > *:nth-child(9)  { animation-delay: 320ms; }
+.stagger > *:nth-child(10) { animation-delay: 360ms; }
+
+/* Skeleton loading placeholder */
+.skel {
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  animation: fleetops-skel 1.4s ease-in-out infinite;
+}

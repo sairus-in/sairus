@@ -45,7 +45,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/logout', { preHandler: requireMobileAuth }, async (req, reply) => {
     const user = req.user as MobileJWTPayload;
     await mobileLogout(user.sub, user.deviceId);
-    reply.send(ok({ message: 'Logged out' }, req.id));
+    return reply.send(ok({ message: 'Logged out' }, req.id));
   });
 
   app.post('/logout-all', { preHandler: requireMobileAuth }, async (req, reply) => {
@@ -58,7 +58,7 @@ export async function authRoutes(app: FastifyInstance) {
     });
 
     await revokeAllSessionsForUser(userId, deviceId);
-    reply.send(ok({ message: 'All sessions logged out' }, req.id));
+    return reply.send(ok({ message: 'Logged out all sessions' }, req.id));
   });
 
   app.get('/me', { preHandler: requireMobileAuth }, async (req, reply) => {

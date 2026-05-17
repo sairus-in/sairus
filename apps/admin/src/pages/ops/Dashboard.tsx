@@ -1,20 +1,28 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
 import {
-  AdminCommandEntity,
   AdminFocusModeState,
   AdminMessageInput,
-  AdminPriorityLevel,
   AdminSuggestedAction,
 } from 'shared';
-import { MessageSquare, Radio, ShieldAlert, Siren, X } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api.client';
 import { extractApiError } from '../../lib/api-error';
 import { QueryError } from '../../components/shared/QueryError';
-import { StatusBadge } from '../../lib/status';
-import { useAuthStore } from '../../store/auth.store';
+import { Icon } from '../../components/design/Icon';
+import {
+  Donut,
+  Gauge,
+  KPIBlock,
+  PriorityChip,
+  SectionCard,
+  StateBadge,
+  formatPriorityTone,
+  toneClass,
+  useGreeting,
+} from '../../components/design/primitives';
+import { useAlerts } from '../../hooks/useAlerts';
 import { useActiveTrips } from '../../hooks/useActiveTrips';
 import {
   useAssignSubstitute,
@@ -26,31 +34,16 @@ import {
   useSubstituteCandidates,
 } from '../../hooks/useCommandCenter';
 import { useMessages } from '../../hooks/useMessages';
+import { useReports } from '../../hooks/useReports';
+import { QK } from '../../lib/query-keys';
+import { useAuthStore } from '../../store/auth.store';
 
-const panelStyle: React.CSSProperties = {
-  background: '#111827',
-  border: '1px solid #1F2937',
-  borderRadius: 20,
-  padding: '1rem',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '1rem',
-  minHeight: 0,
-};
-
-const priorityColor: Record<AdminPriorityLevel, string> = {
-  CRITICAL: '#EF4444',
-  HIGH: '#F97316',
-  MEDIUM: '#F59E0B',
-  LOW: '#22C55E',
-};
-
-const metricCardStyle: React.CSSProperties = {
-  background: 'rgba(15, 23, 42, 0.85)',
-  border: '1px solid rgba(51, 65, 85, 0.7)',
-  borderRadius: 18,
-  padding: '1rem 1.1rem',
-};
+const formatActionLabel = (action: AdminSuggestedAction['type']) =>
+  action
+    .toLowerCase()
+    .split('_')
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(' ');
 
 const getActionAllowed = (action: AdminSuggestedAction, capabilities: ReturnType<typeof useAuthStore.getState>['capabilities']) => {
   if (!capabilities) {
@@ -79,68 +72,14 @@ const getActionAllowed = (action: AdminSuggestedAction, capabilities: ReturnType
   }
 };
 
-const EntityCard = ({
-  entity,
-  active,
-  onSelect,
-}: {
-  entity: AdminCommandEntity;
-  active: boolean;
-  onSelect: () => void;
-}) => (
-  <button
-    type="button"
-    onClick={onSelect}
-    style={{
-      textAlign: 'left',
-      borderRadius: 18,
-      border: `1px solid ${active ? priorityColor[entity.priority] : '#1F2937'}`,
-      background: active ? 'rgba(30, 41, 59, 0.95)' : '#0F172A',
-      padding: '0.95rem',
-      color: '#F8FAFC',
-      cursor: 'pointer',
-      display: 'grid',
-      gap: '0.55rem',
-    }}
-  >
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
-      <div>
-        <div style={{ fontSize: '0.72rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: priorityColor[entity.priority], fontWeight: 800 }}>
-          {entity.priority}
-        </div>
-        <div style={{ marginTop: '0.28rem', fontWeight: 700 }}>{entity.title}</div>
-      </div>
-      <div style={{ color: '#94A3B8', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
-        {entity.ageMinutes ? `${entity.ageMinutes} min` : 'now'}
-      </div>
-    </div>
-    <div style={{ color: '#CBD5E1', fontSize: '0.88rem', lineHeight: 1.45 }}>{entity.summary}</div>
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
-      {entity.badges.map((badge) => (
-        <span
-          key={badge}
-          style={{
-            padding: '0.2rem 0.55rem',
-            borderRadius: 999,
-            background: 'rgba(30, 41, 59, 0.95)',
-            color: '#CBD5E1',
-            fontSize: '0.72rem',
-            border: '1px solid rgba(71, 85, 105, 0.7)',
-          }}
-        >
-          {badge}
-        </span>
-      ))}
-    </div>
-  </button>
-);
-
 export const Dashboard: React.FC = () => {
+  const greeting = useGreeting();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { capabilities } = useAuthStore();
+  const { capabilities, user } = useAuthStore();
+  const { data: alerts = [] } = useAlerts();
   const { data: commandCenter, isLoading, error: commandCenterError, refetch: refetchCommandCenter } = useCommandCenter();
-  const { data: trips = [], error: activeTripsError, refetch: refetchActiveTrips } = useActiveTrips();
+  const { data: trips = [], error: tripsError, refetch: refetchTrips } = useActiveTrips();
   const [focusMode, setFocusMode] = useState<AdminFocusModeState>('ALL');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [composer, setComposer] = useState('');
@@ -148,6 +87,17 @@ export const Dashboard: React.FC = () => {
   const [selectedAlternateBusId, setSelectedAlternateBusId] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const reportWindow = useMemo(() => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 6);
+    return {
+      startDate: format(start, 'yyyy-MM-dd'),
+      endDate: format(end, 'yyyy-MM-dd'),
+    };
+  }, []);
+
+  const { overview } = useReports(reportWindow);
   const notifyAffected = useNotifyAffectedUsers();
   const requestDelegate = useRequestDelegate();
   const escalateIncident = useEscalateIncident();
@@ -159,9 +109,9 @@ export const Dashboard: React.FC = () => {
       api.patch(`/v1/admin/incidents/${incidentId}/resolve`, { resolution }),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['live', 'command-center'] }),
-        queryClient.invalidateQueries({ queryKey: ['admin', 'incidents'] }),
-        queryClient.invalidateQueries({ queryKey: ['admin', 'messages'] }),
+        queryClient.invalidateQueries({ queryKey: QK.commandCenter() }),
+        queryClient.invalidateQueries({ queryKey: QK.incidents() }),
+        queryClient.invalidateQueries({ queryKey: QK.messages() }),
       ]);
       setResolutionNote('');
     },
@@ -171,8 +121,8 @@ export const Dashboard: React.FC = () => {
     mutationFn: (tripId: string) => api.post(`/v1/admin/ops/gps-outages/${tripId}/coordinator-override`),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['live', 'command-center'] }),
-        queryClient.invalidateQueries({ queryKey: ['ops', 'gps-outages'] }),
+        queryClient.invalidateQueries({ queryKey: QK.commandCenter() }),
+        queryClient.invalidateQueries({ queryKey: QK.gpsOutages() }),
       ]);
     },
   });
@@ -187,6 +137,30 @@ export const Dashboard: React.FC = () => {
     () => visibleEntities.find((entity) => entity.id === selectedEntityId) ?? visibleEntities[0] ?? null,
     [selectedEntityId, visibleEntities],
   );
+
+  const prioritizedTrips = useMemo(
+    () => trips
+      .slice()
+      .sort((left, right) => {
+        const weight = (status: string) => (status === 'OFFLINE' ? 2 : status === 'STALE' ? 1 : 0);
+        return weight(right.gpsStatus) - weight(left.gpsStatus);
+      })
+      .slice(0, 5),
+    [trips],
+  );
+
+  const fleetSegments = useMemo(() => {
+    const live = trips.filter((trip) => trip.gpsStatus === 'LIVE').length;
+    const stale = trips.filter((trip) => trip.gpsStatus === 'STALE').length;
+    const offline = trips.filter((trip) => trip.gpsStatus === 'OFFLINE').length;
+    const idle = Math.max((commandCenter?.stats.activeTrips ?? trips.length) - live - stale - offline, 0);
+    return [
+      { value: live, color: 'var(--ok)' },
+      { value: stale, color: 'var(--warn)' },
+      { value: offline, color: 'var(--err)' },
+      { value: idle, color: 'var(--idle)' },
+    ];
+  }, [commandCenter?.stats.activeTrips, trips]);
 
   useEffect(() => {
     if (!selectedEntityId && visibleEntities[0]) {
@@ -302,206 +276,163 @@ export const Dashboard: React.FC = () => {
   };
 
   if (isLoading) {
-    return <div style={{ color: '#94A3B8' }}>Loading command center...</div>;
+    return <div className="muted">Loading command center...</div>;
   }
 
   if (commandCenterError) {
     return <QueryError message={extractApiError(commandCenterError).message} onRetry={() => void refetchCommandCenter()} />;
   }
 
-  if (activeTripsError) {
-    return <QueryError message={extractApiError(activeTripsError).message} onRetry={() => void refetchActiveTrips()} />;
+  if (tripsError) {
+    return <QueryError message={extractApiError(tripsError).message} onRetry={() => void refetchTrips()} />;
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
-        <div>
-          <div style={{ fontSize: '0.78rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#38BDF8', fontWeight: 800 }}>
-            Fleet Command
-          </div>
-          <h1 style={{ margin: '0.35rem 0 0', color: '#FFFFFF', fontSize: '2rem' }}>Operations Command Center</h1>
-          <p style={{ margin: '0.55rem 0 0', color: '#94A3B8', maxWidth: 760 }}>
-            Prioritize what matters, act inline, and keep comms anchored to the affected trip or incident.
-          </p>
-        </div>
+  const otpValue = Math.round(overview.data?.attendanceRate ?? 0);
 
-        <button
-          type="button"
-          onClick={() => setFocusMode((current) => (current === 'ALL' ? 'URGENT_ONLY' : 'ALL'))}
-          style={{
-            border: 0,
-            borderRadius: 16,
-            background: focusMode === 'URGENT_ONLY' ? '#EF4444' : '#1E293B',
-            color: '#FFFFFF',
-            padding: '0.9rem 1.1rem',
-            fontWeight: 800,
-            cursor: 'pointer',
-          }}
-        >
+  return (
+    <div style={{ display: 'grid', gap: 18, minHeight: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16 }}>
+        <div>
+          <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 500, letterSpacing: '-0.02em' }}>
+            {greeting}, {user?.name?.split(' ')[0] ?? 'Admin'}
+          </h1>
+          <div style={{ marginTop: 4, color: 'var(--muted)', fontSize: 12 }}>
+            {format(new Date(), 'EEE dd MMM')} - <span style={{ color: 'var(--ink-2)' }}>{commandCenter?.stats.activeTrips ?? 0} trips</span> in flight - <span style={{ color: 'var(--ink-2)' }}>{trips.length} buses</span> reporting
+          </div>
+        </div>
+        <button className="btn" type="button" onClick={() => setFocusMode((current) => (current === 'ALL' ? 'URGENT_ONLY' : 'ALL'))}>
+          <Icon name="focusFrame" size={13} />
           {focusMode === 'URGENT_ONLY' ? 'Exit Focus Mode' : 'Enter Focus Mode'}
+          <span className="searchbar__kbd">Ctrl F</span>
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '1rem' }}>
-        <div style={metricCardStyle}>
-          <div style={{ color: '#94A3B8', fontSize: '0.8rem' }}>Active trips</div>
-          <div style={{ color: '#FFFFFF', fontWeight: 800, fontSize: '1.8rem' }}>{commandCenter?.stats.activeTrips ?? 0}</div>
-        </div>
-        <div style={metricCardStyle}>
-          <div style={{ color: '#94A3B8', fontSize: '0.8rem' }}>Critical</div>
-          <div style={{ color: '#FCA5A5', fontWeight: 800, fontSize: '1.8rem' }}>{commandCenter?.stats.criticalCount ?? 0}</div>
-        </div>
-        <div style={metricCardStyle}>
-          <div style={{ color: '#94A3B8', fontSize: '0.8rem' }}>High</div>
-          <div style={{ color: '#FDBA74', fontWeight: 800, fontSize: '1.8rem' }}>{commandCenter?.stats.highCount ?? 0}</div>
-        </div>
-        <div style={metricCardStyle}>
-          <div style={{ color: '#94A3B8', fontSize: '0.8rem' }}>Incidents</div>
-          <div style={{ color: '#FFFFFF', fontWeight: 800, fontSize: '1.8rem' }}>{commandCenter?.stats.unresolvedIncidents ?? 0}</div>
-        </div>
-        <div style={metricCardStyle}>
-          <div style={{ color: '#94A3B8', fontSize: '0.8rem' }}>GPS offline</div>
-          <div style={{ color: '#FFFFFF', fontWeight: 800, fontSize: '1.8rem' }}>{commandCenter?.stats.gpsOffline ?? 0}</div>
-        </div>
-        <div style={metricCardStyle}>
-          <div style={{ color: '#94A3B8', fontSize: '0.8rem' }}>Impacted riders</div>
-          <div style={{ color: '#FFFFFF', fontWeight: 800, fontSize: '1.8rem' }}>{commandCenter?.stats.impactedUsers ?? 0}</div>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10 }}>
+        <KPIBlock label="Buses on Route" value={`${trips.filter((trip) => trip.gpsStatus === 'LIVE').length}/${Math.max(trips.length, 1)}`} sub="live telemetry" spark={[18, 19, 21, 20, 22, 23, 24, 24]} delay={0} />
+        <KPIBlock label="Active Trips" value={commandCenter?.stats.activeTrips ?? 0} sub={<span>{otpValue}% attendance rate</span>} trend={{ label: 'tracked', color: 'var(--ok)' }} delay={40} />
+        <KPIBlock label="Open Incidents" value={commandCenter?.stats.unresolvedIncidents ?? 0} sub={<span>{commandCenter?.stats.criticalCount ?? 0} critical - {commandCenter?.stats.highCount ?? 0} high</span>} delay={80} />
+        <KPIBlock label="GPS Health" value={`${Math.max(0, 100 - Math.round(((commandCenter?.stats.gpsOffline ?? 0) / Math.max(commandCenter?.stats.activeTrips ?? 1, 1)) * 100))}%`} sub={`${commandCenter?.stats.gpsOffline ?? 0} offline`} delay={120} />
+        <KPIBlock label="Unread Comms" value={alerts.filter((alert) => alert.type === 'NEW_MESSAGE').length} sub={`${alerts.length} live alerts`} delay={160} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 320px minmax(360px, 1fr) 360px', gap: '1rem', minHeight: 0, flex: 1 }}>
-        <section style={{ ...panelStyle, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ color: '#F8FAFC', fontWeight: 700 }}>Priority Rail</div>
-              <div style={{ color: '#64748B', fontSize: '0.8rem' }}>{visibleEntities.length} live decisions</div>
-            </div>
-            <Siren size={18} color="#F87171" />
-          </div>
-          <div style={{ display: 'grid', gap: '0.75rem', overflowY: 'auto', paddingRight: '0.1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 14 }}>
+        <SectionCard title="Priority Rail" subtitle={`${visibleEntities.length} ranked decisions`}>
+          <div style={{ display: 'grid', gap: 12 }}>
             {visibleEntities.length === 0 ? (
-              <div style={{ color: '#94A3B8', fontSize: '0.9rem' }}>No items in the current priority filter.</div>
+              <div className="muted">No items in the current priority filter.</div>
             ) : (
-              visibleEntities.map((entity) => (
-                <EntityCard
+              visibleEntities.slice(0, 4).map((entity) => (
+                <button
                   key={entity.id}
-                  entity={entity}
-                  active={selectedEntity?.id === entity.id}
-                  onSelect={() => setSelectedEntityId(entity.id)}
-                />
+                  type="button"
+                  onClick={() => setSelectedEntityId(entity.id)}
+                  style={{
+                    padding: 14,
+                    textAlign: 'left',
+                    border: `1px solid ${selectedEntity?.id === entity.id ? 'var(--border-3)' : 'var(--divider)'}`,
+                    borderRadius: 'var(--r-md)',
+                    background: selectedEntity?.id === entity.id ? 'var(--surface-2)' : 'transparent',
+                    transition: 'background var(--t-fast), border-color var(--t-fast)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <PriorityChip level={entity.priority === 'CRITICAL' ? 'p1' : entity.priority === 'HIGH' ? 'p2' : 'p3'} />
+                      <span style={{ fontWeight: 500, fontSize: 13 }}>{entity.title}</span>
+                    </div>
+                    <span className="mono muted">{entity.ageMinutes ? `${entity.ageMinutes}m` : 'now'}</span>
+                  </div>
+                  <div style={{ color: 'var(--ink-2)', fontSize: 12, marginBottom: 10 }}>{entity.summary}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {entity.badges.slice(0, 3).map((badge) => (
+                        <span key={badge} className="pill pill--idle">{badge}</span>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      {entity.actions.slice(0, 3).map((action) => (
+                        <button
+                          key={action.id}
+                          type="button"
+                          className={`btn sm ${action.priority === 'CRITICAL' ? 'primary' : ''}`}
+                          disabled={!getActionAllowed(action, capabilities) || action.disabled}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleAction(action);
+                          }}
+                        >
+                          {formatActionLabel(action.type)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </button>
               ))
             )}
           </div>
-        </section>
+        </SectionCard>
 
-        <section style={{ ...panelStyle, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ color: '#F8FAFC', fontWeight: 700 }}>Live Fleet</div>
-              <div style={{ color: '#64748B', fontSize: '0.8rem' }}>{trips.length} active buses</div>
+        <div style={{ display: 'grid', gap: 14 }}>
+          <SectionCard title="Fleet Health" subtitle={`${trips.length} active buses`}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: 16 }}>
+              <Donut
+                segments={fleetSegments}
+                centerLabel={String(trips.length)}
+                centerSub="ACTIVE"
+              />
+              <div style={{ display: 'grid', gap: 8, minWidth: 140, fontSize: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Live</span><span className="mono">{trips.filter((trip) => trip.gpsStatus === 'LIVE').length}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale</span><span className="mono">{trips.filter((trip) => trip.gpsStatus === 'STALE').length}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Offline</span><span className="mono">{trips.filter((trip) => trip.gpsStatus === 'OFFLINE').length}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Impacted Users</span><span className="mono">{commandCenter?.stats.impactedUsers ?? 0}</span></div>
+              </div>
             </div>
-            <Radio size={18} color="#60A5FA" />
-          </div>
-          <div style={{ display: 'grid', gap: '0.75rem', overflowY: 'auto' }}>
-            {trips.map((trip) => {
-              const linkedEntity = entities.find((entity) => entity.context.tripId === trip.id);
-              return (
-                <button
-                  type="button"
-                  key={trip.id}
-                  onClick={() => linkedEntity ? setSelectedEntityId(linkedEntity.id) : navigate(`/ops/trips/${trip.id}`)}
-                  style={{
-                    textAlign: 'left',
-                    borderRadius: 18,
-                    border: `1px solid ${trip.gpsStatus === 'OFFLINE' ? '#EF4444' : trip.gpsStatus === 'STALE' ? '#F59E0B' : '#1F2937'}`,
-                    background: '#0F172A',
-                    padding: '0.95rem',
-                    color: '#F8FAFC',
-                    cursor: 'pointer',
-                    display: 'grid',
-                    gap: '0.55rem',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>Bus {trip.busNumber}</div>
-                      <div style={{ color: '#94A3B8', fontSize: '0.82rem' }}>{trip.routeName}</div>
-                    </div>
-                    <StatusBadge status={trip.gpsStatus === 'OFFLINE' ? 'GPS_OFFLINE' : trip.gpsStatus === 'STALE' ? 'GPS_STALE' : 'GPS_LIVE'} />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#CBD5E1', fontSize: '0.82rem' }}>
-                    <span>{trip.boardedCount}/{trip.expectedCount} boarded</span>
-                    <span>{formatDistanceToNow(new Date(trip.startedAt))} ago</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+          </SectionCard>
 
-        <section style={{ ...panelStyle, overflowY: 'auto' }}>
+          <SectionCard title="On-Time Performance" subtitle="Target >= 95%">
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <Gauge
+                value={otpValue}
+                max={100}
+                size={220}
+                thickness={14}
+                color="var(--warn)"
+                target={95}
+                label={`${otpValue}%`}
+                sub="ATTENDANCE WINDOW"
+              />
+            </div>
+          </SectionCard>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <SectionCard title="Action Detail" subtitle={selectedEntity ? selectedEntity.context.contextType : 'No selection'}>
           {selectedEntity ? (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
-                <div>
-                  <div style={{ color: priorityColor[selectedEntity.priority], fontWeight: 800, letterSpacing: '0.08em', fontSize: '0.74rem' }}>
-                    {selectedEntity.priority} PRIORITY
-                  </div>
-                  <h2 style={{ margin: '0.4rem 0 0', color: '#FFFFFF' }}>{selectedEntity.title}</h2>
-                  <p style={{ margin: '0.5rem 0 0', color: '#CBD5E1', lineHeight: 1.5 }}>{selectedEntity.summary}</p>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <div className={toneClass(formatPriorityTone(selectedEntity.priority))} style={{ marginBottom: 8, width: 'fit-content' }}>
+                  {selectedEntity.priority}
                 </div>
-                <div style={{ color: '#64748B', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                  {selectedEntity.ageMinutes ? `${selectedEntity.ageMinutes} min active` : 'Fresh'}
-                </div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 500 }}>{selectedEntity.title}</div>
+                <div style={{ marginTop: 6, color: 'var(--ink-2)', lineHeight: 1.55 }}>{selectedEntity.summary}</div>
               </div>
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {selectedEntity.badges.map((badge) => (
-                  <span key={badge} style={{ padding: '0.3rem 0.6rem', borderRadius: 999, background: '#1E293B', color: '#CBD5E1', fontSize: '0.75rem' }}>
-                    {badge}
-                  </span>
+                  <span key={badge} className="pill pill--idle">{badge}</span>
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gap: '0.75rem' }}>
-                {selectedEntity.actions.map((action) => {
-                  const allowed = getActionAllowed(action, capabilities);
-                  return (
-                    <button
-                      key={action.id}
-                      type="button"
-                      disabled={!allowed || action.disabled}
-                      onClick={() => void handleAction(action)}
-                      style={{
-                        textAlign: 'left',
-                        borderRadius: 16,
-                        border: '1px solid #334155',
-                        background: !allowed || action.disabled ? '#0F172A' : '#1E293B',
-                        color: !allowed || action.disabled ? '#64748B' : '#F8FAFC',
-                        padding: '0.9rem 1rem',
-                        cursor: !allowed || action.disabled ? 'not-allowed' : 'pointer',
-                        display: 'grid',
-                        gap: '0.3rem',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
-                        <strong>{action.label}</strong>
-                        <span style={{ color: priorityColor[action.priority], fontSize: '0.72rem', fontWeight: 800 }}>{action.priority}</span>
-                      </div>
-                      <span style={{ color: !allowed || action.disabled ? '#64748B' : '#94A3B8', fontSize: '0.82rem' }}>{action.reason}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {selectedEntity.actions.some((action) => action.type === 'ASSIGN_SUBSTITUTE') && (
-                <div style={{ borderRadius: 18, border: '1px solid #334155', padding: '0.95rem', background: '#0F172A' }}>
-                  <div style={{ color: '#F8FAFC', fontWeight: 700, marginBottom: '0.65rem' }}>Substitute selection</div>
+              {selectedEntity.actions.some((action) => action.type === 'ASSIGN_SUBSTITUTE') ? (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <label style={{ color: 'var(--muted)', fontSize: 11, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                    Substitute Bus
+                  </label>
                   <select
                     value={selectedAlternateBusId}
                     onChange={(event) => setSelectedAlternateBusId(event.target.value)}
-                    style={{ width: '100%', borderRadius: 12, border: '1px solid #334155', background: '#020617', color: '#F8FAFC', padding: '0.75rem 0.8rem' }}
+                    style={{ padding: '10px 12px', border: '1px solid var(--border-2)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)' }}
                   >
                     <option value="">Select alternate bus</option>
                     {substituteCandidates.map((candidate) => (
@@ -511,144 +442,172 @@ export const Dashboard: React.FC = () => {
                     ))}
                   </select>
                 </div>
-              )}
+              ) : null}
 
-              <div style={{ display: 'grid', gap: '0.6rem' }}>
-                <label style={{ color: '#CBD5E1', fontSize: '0.84rem', fontWeight: 700 }}>Ops note / resolution</label>
-                <textarea
-                  value={resolutionNote}
-                  onChange={(event) => setResolutionNote(event.target.value)}
-                  rows={4}
-                  placeholder="Add the recovery decision, escalation note, or incident resolution."
-                  style={{ resize: 'vertical', borderRadius: 16, border: '1px solid #334155', background: '#020617', color: '#F8FAFC', padding: '0.85rem 0.9rem' }}
-                />
-              </div>
+              <textarea
+                value={resolutionNote}
+                onChange={(event) => setResolutionNote(event.target.value)}
+                rows={4}
+                placeholder="Add the recovery decision, escalation note, or incident resolution."
+                style={{ resize: 'vertical', padding: '10px 12px', border: '1px solid var(--border-2)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)' }}
+              />
 
-              {actionError && (
-                <div style={{ borderRadius: 14, background: 'rgba(127, 29, 29, 0.45)', border: '1px solid rgba(248, 113, 113, 0.35)', color: '#FCA5A5', padding: '0.85rem 0.95rem' }}>
-                  {actionError}
-                </div>
-              )}
-            </>
-          ) : (
-            <div style={{ color: '#94A3B8' }}>Select a live entity to view actions and contextual comms.</div>
-          )}
-        </section>
-
-        <section style={{ ...panelStyle, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center' }}>
-            <div>
-              <div style={{ color: '#F8FAFC', fontWeight: 700 }}>Action Comms</div>
-              <div style={{ color: '#64748B', fontSize: '0.8rem' }}>
-                {selectedEntity ? `${selectedEntity.context.contextType} thread` : 'Global broadcast'}
-              </div>
+              {actionError ? <div className="pill pill--err" style={{ width: 'fit-content', textTransform: 'none', fontSize: 12 }}>{actionError}</div> : null}
             </div>
-            <MessageSquare size={18} color="#38BDF8" />
-          </div>
+          ) : (
+            <div className="muted">Select a live entity to view actions and contextual comms.</div>
+          )}
+        </SectionCard>
 
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse', gap: '0.75rem' }}>
-            {threadMessages.length === 0 ? (
-              <div style={{ color: '#94A3B8', fontSize: '0.86rem' }}>No contextual messages yet.</div>
-            ) : (
-              threadMessages.map((message) => (
-                <div key={message.id} style={{ borderRadius: 16, background: '#0F172A', border: '1px solid #1E293B', padding: '0.85rem 0.9rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.6rem', color: '#94A3B8', fontSize: '0.74rem' }}>
-                    <span>{message.sender.name} ({message.sender.role})</span>
-                    <span>{formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}</span>
+        <SectionCard title="Active Fleet" subtitle={`${prioritizedTrips.length} surfaced buses`}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {prioritizedTrips.map((trip) => (
+              <button
+                key={trip.id}
+                type="button"
+                onClick={() => navigate(`/ops/trips/${trip.id}`)}
+                style={{
+                  display: 'grid',
+                  gap: 4,
+                  padding: 12,
+                  border: '1px solid var(--divider)',
+                  borderRadius: 'var(--r-md)',
+                  background: 'transparent',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 500 }}>Bus {trip.busNumber}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{trip.routeName}</div>
                   </div>
-                  <div style={{ marginTop: '0.45rem', color: '#F8FAFC', lineHeight: 1.5 }}>{message.body}</div>
+                  <StateBadge state={trip.gpsStatus} />
                 </div>
-              ))
-            )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: 'var(--ink-2)', fontSize: 12 }}>
+                  <span>{trip.boardedCount}/{trip.expectedCount} boarded</span>
+                  <span className="mono">{format(new Date(trip.startedAt), 'HH:mm')}</span>
+                </div>
+              </button>
+            ))}
           </div>
+        </SectionCard>
+      </div>
 
-          <div style={{ display: 'grid', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <SectionCard title="Action Comms" subtitle={selectedEntity ? `${selectedEntity.context.contextType} thread` : 'Global broadcast'}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div className="scroll" style={{ maxHeight: 240, display: 'grid', gap: 10 }}>
+              {threadMessages.length === 0 ? (
+                <div className="muted">No contextual messages yet.</div>
+              ) : (
+                threadMessages.map((message) => (
+                  <div key={message.id} style={{ padding: 12, border: '1px solid var(--divider)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4, color: 'var(--muted)', fontSize: 11 }}>
+                      <span>{message.sender.name} ({message.sender.role})</span>
+                      <span className="mono">{format(new Date(message.createdAt), 'HH:mm')}</span>
+                    </div>
+                    <div style={{ color: 'var(--ink-2)', lineHeight: 1.45 }}>{message.body}</div>
+                  </div>
+                ))
+              )}
+            </div>
             <textarea
               value={composer}
               onChange={(event) => setComposer(event.target.value)}
               rows={4}
               placeholder={capabilities?.canMessageDrivers ? 'Send a contextual operations update...' : 'Read-only for your role'}
               disabled={!capabilities?.canMessageDrivers}
-              style={{ resize: 'vertical', borderRadius: 16, border: '1px solid #334155', background: '#020617', color: '#F8FAFC', padding: '0.85rem 0.9rem' }}
+              style={{ resize: 'vertical', padding: '10px 12px', border: '1px solid var(--border-2)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)' }}
             />
-            <button
-              type="button"
-              onClick={() => void sendThreadMessage()}
-              disabled={!capabilities?.canMessageDrivers || !composer.trim()}
-              style={{
-                border: 0,
-                borderRadius: 14,
-                background: !capabilities?.canMessageDrivers || !composer.trim() ? '#334155' : '#0EA5E9',
-                color: '#FFFFFF',
-                padding: '0.9rem 1rem',
-                fontWeight: 800,
-                cursor: !capabilities?.canMessageDrivers || !composer.trim() ? 'not-allowed' : 'pointer',
-              }}
-            >
+            <button className="btn primary" type="button" disabled={!capabilities?.canMessageDrivers || !composer.trim()} onClick={() => void sendThreadMessage()}>
+              <Icon name="send" size={12} />
               Send contextual update
             </button>
           </div>
-        </section>
+        </SectionCard>
+
+        <SectionCard title="Live Alert Feed" subtitle={`${alerts.length} recent alerts`}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {alerts.slice(0, 5).map((alert, index) => (
+              <div key={`${alert.timestamp}-${index}`} style={{ paddingBottom: 10, borderBottom: index < Math.min(alerts.length, 5) - 1 ? '1px solid var(--divider)' : 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                  <span className={toneClass(alert.priority >= 3 ? 'err' : alert.priority === 2 ? 'warn' : 'info')}>P{Math.max(1, Math.min(alert.priority, 3))}</span>
+                  <span className="mono muted">{format(new Date(alert.timestamp), 'HH:mm:ss')}</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 4 }}>{alert.summary}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  {alert.busNumber ? `Bus ${alert.busNumber}` : alert.routeName ?? alert.type}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
       </div>
 
-      {focusMode === 'URGENT_ONLY' && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.82)', backdropFilter: 'blur(8px)', zIndex: 60, padding: '2rem' }}>
-          <div style={{ maxWidth: 1280, margin: '0 auto', height: '100%', display: 'grid', gridTemplateColumns: '420px 1fr', gap: '1rem' }}>
-            <div style={{ ...panelStyle, overflowY: 'auto' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {focusMode === 'URGENT_ONLY' ? (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 70, padding: 32, background: 'rgba(15, 15, 17, 0.62)', backdropFilter: 'blur(6px)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '420px minmax(0, 1fr)', gap: 16, height: '100%' }}>
+            <div className="card" style={{ background: '#1a1a1d', color: '#eee', borderColor: '#2a2a2d', overflow: 'auto' }}>
+              <div className="card-head" style={{ borderBottomColor: '#2a2a2d' }}>
                 <div>
-                  <div style={{ color: '#FCA5A5', fontWeight: 800, letterSpacing: '0.08em', fontSize: '0.75rem' }}>FOCUS MODE</div>
-                  <h2 style={{ margin: '0.35rem 0 0', color: '#FFFFFF' }}>Urgent decisions only</h2>
+                  <div style={{ color: '#777', fontSize: 10, fontWeight: 500, letterSpacing: '0.12em' }}>FOCUS MODE</div>
+                  <h3 style={{ color: '#fff' }}>Urgent decisions only</h3>
                 </div>
-                <button type="button" onClick={() => setFocusMode('ALL')} style={{ border: 0, background: 'transparent', color: '#CBD5E1', cursor: 'pointer' }}>
-                  <X size={22} />
-                </button>
+                <button className="focus-overlay__exit" type="button" onClick={() => setFocusMode('ALL')}>Exit</button>
               </div>
-              {visibleEntities.map((entity) => (
-                <EntityCard key={entity.id} entity={entity} active={selectedEntity?.id === entity.id} onSelect={() => setSelectedEntityId(entity.id)} />
-              ))}
+              <div className="card-body" style={{ display: 'grid', gap: 10 }}>
+                {visibleEntities.map((entity) => (
+                  <button
+                    key={entity.id}
+                    type="button"
+                    onClick={() => setSelectedEntityId(entity.id)}
+                    style={{ padding: 12, borderRadius: 'var(--r-md)', border: '1px solid #2a2a2d', background: selectedEntity?.id === entity.id ? '#232327' : 'transparent', color: '#eee', textAlign: 'left' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                      <PriorityChip level={entity.priority === 'CRITICAL' ? 'p1' : 'p2'} />
+                      <span className="mono" style={{ color: '#999' }}>{entity.ageMinutes ? `${entity.ageMinutes}m` : 'now'}</span>
+                    </div>
+                    <div style={{ fontWeight: 500, marginBottom: 4 }}>{entity.title}</div>
+                    <div style={{ color: '#bbb', fontSize: 12 }}>{entity.summary}</div>
+                  </button>
+                ))}
+              </div>
             </div>
-
-            <div style={{ ...panelStyle }}>
-              {selectedEntity ? (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: priorityColor[selectedEntity.priority], fontWeight: 800 }}>
-                    <ShieldAlert size={20} />
-                    {selectedEntity.title}
-                  </div>
-                  <div style={{ color: '#CBD5E1', lineHeight: 1.6 }}>{selectedEntity.summary}</div>
-                  <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
-                    {selectedEntity.actions
-                      .filter((action) => action.confidence === 'HIGH' && !action.disabled)
-                      .map((action) => (
-                        <button
-                          key={action.id}
-                          type="button"
-                          onClick={() => void handleAction(action)}
-                          disabled={!getActionAllowed(action, capabilities)}
-                          style={{
-                            border: 0,
-                            borderRadius: 18,
-                            background: '#EF4444',
-                            color: '#FFFFFF',
-                            padding: '1rem 1.1rem',
-                            fontWeight: 800,
-                            cursor: getActionAllowed(action, capabilities) ? 'pointer' : 'not-allowed',
-                            opacity: getActionAllowed(action, capabilities) ? 1 : 0.45,
-                          }}
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                  </div>
-                </>
-              ) : (
-                <div style={{ color: '#94A3B8' }}>No urgent items selected.</div>
-              )}
+            <div className="card" style={{ background: '#1a1a1d', color: '#eee', borderColor: '#2a2a2d' }}>
+              <div className="card-head" style={{ borderBottomColor: '#2a2a2d' }}>
+                <div>
+                  <div style={{ color: '#777', fontSize: 10, fontWeight: 500, letterSpacing: '0.12em' }}>COMMAND ONLY</div>
+                  <h3 style={{ color: '#fff' }}>{selectedEntity?.title ?? 'No urgent entity selected'}</h3>
+                </div>
+              </div>
+              <div className="card-body" style={{ display: 'grid', gap: 12 }}>
+                <div style={{ color: '#ccc' }}>{selectedEntity?.summary}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                  {selectedEntity?.actions.filter((action) => action.confidence === 'HIGH' && !action.disabled).slice(0, 4).map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onClick={() => void handleAction(action)}
+                      disabled={!getActionAllowed(action, capabilities)}
+                      style={{
+                        padding: '14px 16px',
+                        border: 0,
+                        borderRadius: 'var(--r-lg)',
+                        background: '#ef4444',
+                        color: '#fff',
+                        fontWeight: 700,
+                        opacity: getActionAllowed(action, capabilities) ? 1 : 0.45,
+                      }}
+                    >
+                      {formatActionLabel(action.type)}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

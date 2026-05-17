@@ -1,6 +1,6 @@
 # Stabilization Plan — College Bus Management System
 
-**Target file on approval:** `plans/stabilization.426.md`
+
 **Authored:** 2026-04-22
 **Approved scope:** option (a) — stabilize the mobile platform and backend contracts before any new mobile UI work.
 

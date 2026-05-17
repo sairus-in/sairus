@@ -1,20 +1,28 @@
 // app/(student)/self-report-prompt.tsx — Self Report Attendance
-// HARDENED v3:
-//   - All hardcoded hex → theme tokens (LAW 2)
-//   - console.error → analytics.error (LAW 5)
-//   - analytics.track on self-report submit (LAW 6)
-//   - isMounted ref added for setTimeout navigations
-//   - ScreenErrorBoundary wrapping
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { studentService } from '../../services/student.service';
-import { colors, typography, spacing, radii } from '../../constants/theme';
-import { Ionicons } from '@expo/vector-icons';
+import { typography } from '../../constants/theme';
 import { queryClient } from '../../lib/query-client';
 import { analytics } from '../../lib/analytics';
 import { ScreenErrorBoundary } from '../../components/shared/ScreenErrorBoundary';
 import { ApiError } from '../../lib/api.client';
+
+// ── Local tokens ──────────────────────────────────────────────────
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  ghost: '#C9C9C9',
+  surface: '#FFFFFF',
+  btnBg: '#356C8F',
+  btnText: '#FFFFFF',
+  btnSecBg: '#FFFFFF',
+  btnSecText: '#1A1A1C',
+  link: '#356C8F',
+};
 
 // States: LOADING -> EXPIRED | READY -> SUBMITTING -> DONE_YES | DONE_NO | ERROR
 type ScreenState = 'LOADING' | 'EXPIRED' | 'READY' | 'SUBMITTING' | 'DONE_YES' | 'DONE_NO' | 'ERROR';
@@ -44,16 +52,11 @@ function SelfReportPromptContent() {
   }, []);
 
   useEffect(() => {
-    if (!tripId) {
-      setState('EXPIRED');
-    }
+    if (!tripId) setState('EXPIRED');
   }, [tripId]);
 
   const scheduleNavigation = (destination: '/(student)/' | '/(student)/history') => {
-    if (navigationTimerRef.current) {
-      clearTimeout(navigationTimerRef.current);
-    }
-
+    if (navigationTimerRef.current) clearTimeout(navigationTimerRef.current);
     navigationTimerRef.current = setTimeout(() => {
       router.replace(destination);
       navigationTimerRef.current = null;
@@ -62,22 +65,14 @@ function SelfReportPromptContent() {
 
   const handleResponse = async (wasOnBus: boolean) => {
     if (!tripId) return;
-
     setState('SUBMITTING');
-
     try {
-      const result = await studentService.selfReport({
-        tripId,
-        wasOnBus,
-      });
-
+      const result = await studentService.selfReport({ tripId, wasOnBus });
       if (result.success || result.status) {
         setState(wasOnBus ? 'DONE_YES' : 'DONE_NO');
         analytics.track('self_report_submitted', { tripId, wasOnBus });
-
         queryClient.invalidateQueries({ queryKey: ['attendance-history'] });
         queryClient.invalidateQueries({ queryKey: ['student-home'] });
-
         scheduleNavigation(wasOnBus ? '/(student)/history' : '/(student)/');
       } else {
         setState('ERROR');
@@ -100,159 +95,239 @@ function SelfReportPromptContent() {
 
   if (state === 'LOADING') {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color={colors.brand.primary} />
-        <Text style={styles.loadingText}>Verifying trip status…</Text>
-      </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.centerLayout}>
+          <ActivityIndicator size="large" color={C.btnBg} />
+          <Text style={s.stateBody}>Verifying trip status…</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (state === 'EXPIRED') {
     return (
-      <View style={styles.centerContainer}>
-        <Ionicons name="time-outline" size={64} color={colors.text.secondary} />
-        <Text style={styles.title}>Window Closed</Text>
-        <Text style={styles.subtitle}>The review window for this trip has already closed or your attendance is already resolved.</Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => router.replace('/(student)/')}>
-          <Text style={styles.primaryButtonText}>Go Home</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.centerLayout}>
+          <Text style={s.stateTitle}>Window Closed</Text>
+          <Text style={s.stateBody}>
+            The review window for this trip has already closed or your attendance is already resolved.
+          </Text>
+          <TouchableOpacity
+            style={s.btn}
+            onPress={() => router.replace('/(student)/')}
+            activeOpacity={0.85}
+          >
+            <Text style={s.btnLabel}>Go Home</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (state === 'DONE_YES') {
     return (
-      <View style={styles.centerContainer}>
-        <Ionicons name="checkmark-circle" size={64} color={colors.success.text} />
-        <Text style={styles.title}>Report Submitted</Text>
-        <Text style={styles.subtitle}>Correction request submitted. Your coordinator will review it shortly.</Text>
-      </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.centerLayout}>
+          <Text style={s.stateTitle}>Report Submitted</Text>
+          <Text style={s.stateBody}>
+            Correction request submitted. Your coordinator will review it shortly.
+          </Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (state === 'DONE_NO') {
     return (
-      <View style={styles.centerContainer}>
-        <Ionicons name="close-circle" size={64} color={colors.text.secondary} />
-        <Text style={styles.title}>Absence Recorded</Text>
-        <Text style={styles.subtitle}>Got it. Your absence has been safely recorded for this trip.</Text>
-      </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.centerLayout}>
+          <Text style={s.stateTitle}>Absence Recorded</Text>
+          <Text style={s.stateBody}>
+            Got it. Your absence has been safely recorded for this trip.
+          </Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (state === 'ERROR') {
     return (
-      <View style={styles.centerContainer}>
-        <Ionicons name="alert-circle" size={64} color={colors.error.text} />
-        <Text style={styles.title}>Connection Error</Text>
-        <Text style={styles.subtitle}>Something went wrong while submitting your response. Please ensure you have an active internet connection.</Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => setState('READY')}>
-          <Text style={styles.primaryButtonText}>Try Again</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={{ marginTop: spacing.md }} onPress={() => router.replace('/(student)/')}>
-          <Text style={[styles.subtitle, { color: colors.brand.primary }]}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.centerLayout}>
+          <Text style={s.stateTitle}>Something went wrong</Text>
+          <Text style={s.stateBody}>
+            We couldn't submit your response. Check your connection and try again.
+          </Text>
+          <TouchableOpacity
+            style={s.btn}
+            onPress={() => setState('READY')}
+            activeOpacity={0.85}
+          >
+            <Text style={s.btnLabel}>Try Again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.linkWrap}
+            onPress={() => router.replace('/(student)/')}
+            activeOpacity={0.7}
+          >
+            <Text style={s.linkText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Ionicons name="bus" size={48} color={colors.brand.primary} />
-        <Text style={styles.title}>Were you on Bus {busNumber} today?</Text>
-        <Text style={styles.subtitle}>
-          The driver's app on your bus encountered an offline issue today. Let us know if you were on board so we can securely update your attendance.
-        </Text>
-      </View>
+    <SafeAreaView style={s.container}>
+      <View style={s.layout}>
 
-      <View style={styles.actionContainer}>
-        {state === 'SUBMITTING' ? (
-          <ActivityIndicator size="large" color={colors.brand.primary} />
-        ) : (
-          <>
-            <TouchableOpacity style={styles.primaryButton} onPress={() => handleResponse(true)}>
-              <Text style={styles.primaryButtonText}>Yes, I was on the bus</Text>
-            </TouchableOpacity>
+        {/* Question */}
+        <View style={s.questionBlock}>
+          <Text style={s.questionLabel}>Attendance check</Text>
+          <Text style={s.questionTitle}>Were you on Bus {busNumber} today?</Text>
+          <Text style={s.questionBody}>
+            The driver's app encountered an offline issue. Let us know if you were on board so we can update your attendance.
+          </Text>
+        </View>
 
-            <TouchableOpacity style={styles.secondaryButton} onPress={() => handleResponse(false)}>
-              <Text style={styles.secondaryButtonText}>No, I wasn't</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        {/* Actions */}
+        <View style={s.actionBlock}>
+          {state === 'SUBMITTING' ? (
+            <ActivityIndicator size="large" color={C.btnBg} />
+          ) : (
+            <>
+              <TouchableOpacity
+                style={s.btn}
+                onPress={() => handleResponse(true)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+              >
+                <Text style={s.btnLabel}>Yes, I was on the bus</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={s.btnSecondary}
+                onPress={() => handleResponse(false)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+              >
+                <Text style={s.btnSecondaryLabel}>No, I wasn't</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.surface,
-    padding: spacing.xl,
-    justifyContent: 'center',
+    backgroundColor: C.bg,
   },
-  centerContainer: {
+
+  // Main layout
+  layout: {
     flex: 1,
-    backgroundColor: colors.surface,
+    paddingHorizontal: 28,
+    paddingTop: 60,
+    paddingBottom: 48,
+    justifyContent: 'space-between',
+  },
+
+  // State layouts (loading, expired, done, error)
+  centerLayout: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingVertical: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.xl,
+    gap: 16,
   },
-  header: {
-    alignItems: 'center',
-    marginBottom: spacing['2xl'],
-  },
-  title: {
+  stateTitle: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.h2,
-    fontWeight: typography.weights.bold,
-    color: colors.text.primary,
+    fontSize: 24,
+    fontWeight: '700',
+    color: C.ink,
     textAlign: 'center',
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
+    letterSpacing: -0.4,
   },
-  subtitle: {
+  stateBody: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    color: colors.text.secondary,
+    fontSize: 15,
+    color: C.muted,
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 23,
   },
-  actionContainer: {
-    width: '100%',
-    gap: spacing.md,
+
+  // Question block
+  questionBlock: {
+    gap: 10,
   },
-  primaryButton: {
-    backgroundColor: colors.brand.primary,
-    paddingVertical: spacing.md,
-    borderRadius: radii.button,
+  questionLabel: {
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.muted,
+  },
+  questionTitle: {
+    fontFamily: typography.family,
+    fontSize: 26,
+    fontWeight: '700',
+    color: C.ink,
+    letterSpacing: -0.5,
+    lineHeight: 34,
+  },
+  questionBody: {
+    fontFamily: typography.family,
+    fontSize: 15,
+    color: C.muted,
+    lineHeight: 23,
+    marginTop: 4,
+  },
+
+  // Action block
+  actionBlock: {
+    gap: 10,
+    minHeight: 140,
+    justifyContent: 'flex-end',
+  },
+
+  // Buttons
+  btn: {
+    backgroundColor: C.btnBg,
+    height: 54,
+    borderRadius: 14,
     alignItems: 'center',
-    width: '100%',
+    justifyContent: 'center',
   },
-  primaryButtonText: {
+  btnLabel: {
     fontFamily: typography.family,
-    color: colors.white,
-    fontSize: typography.sizes.body,
-    fontWeight: typography.weights.semibold,
+    fontSize: 16,
+    fontWeight: '600',
+    color: C.btnText,
   },
-  secondaryButton: {
-    backgroundColor: colors.neutral.bg,
-    paddingVertical: spacing.md,
-    borderRadius: radii.button,
+  btnSecondary: {
+    backgroundColor: C.btnSecBg,
+    height: 54,
+    borderRadius: 14,
     alignItems: 'center',
-    width: '100%',
+    justifyContent: 'center',
   },
-  secondaryButtonText: {
+  btnSecondaryLabel: {
     fontFamily: typography.family,
-    color: colors.text.primary,
-    fontSize: typography.sizes.body,
-    fontWeight: typography.weights.semibold,
+    fontSize: 16,
+    fontWeight: '500',
+    color: C.btnSecText,
   },
-  loadingText: {
+  linkWrap: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  linkText: {
     fontFamily: typography.family,
-    marginTop: spacing.md,
-    fontSize: typography.sizes.body,
-    color: colors.text.secondary,
+    fontSize: 14,
+    color: C.ghost,
   },
 });

@@ -1,14 +1,29 @@
 // app/(driver)/post-breakdown.tsx — Post-breakdown status screen
-// HARDENED v3:
-//   - All hex colors removed
-//   - ScreenErrorBoundary wrapping
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, typography, spacing, radii } from '../../constants/theme';
+import { typography } from '../../constants/theme';
 import { t } from '../../i18n';
 import { ScreenErrorBoundary } from '../../components/shared/ScreenErrorBoundary';
+
+// ── Local tokens ──────────────────────────────────────────────────
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  surface: '#FFFFFF',
+  pill: '#FFFFFF',
+  pillText: '#1A1A1C',
+  link: '#356C8F',
+};
+
+const STATUS_OPTIONS = [
+  { key: 'ack',        labelKey: 'breakdown.ack' },
+  { key: 'onTheWay',  labelKey: 'breakdown.onTheWay' },
+  { key: 'needHelp',  labelKey: 'breakdown.needHelp' },
+  { key: 'willBeLate', labelKey: 'breakdown.willBeLate' },
+] as const;
 
 export default function PostBreakdownScreen() {
   return (
@@ -21,86 +36,124 @@ export default function PostBreakdownScreen() {
 function PostBreakdownContent() {
   const router = useRouter();
   const params = useLocalSearchParams<{ tripId: string; type: string }>();
+  const incidentLabel = t(`breakdown.types.${params.type}` as any) || params.type;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <View style={styles.card}>
-          <Text style={styles.icon}>⚠️</Text>
-          <Text style={styles.title}>{t('breakdown.reported')}</Text>
-          <Text style={styles.type}>
-            {t(`breakdown.types.${params.type}` as any) || params.type}
+    <SafeAreaView style={s.container}>
+      <View style={s.layout}>
+
+        {/* Status */}
+        <View style={s.statusBlock}>
+          <Text style={s.statusLabel}>{t('breakdown.reported')}</Text>
+          <Text style={s.incidentType}>{incidentLabel}</Text>
+          <Text style={s.statusNote}>
+            Transport operations have been notified and support is on the way.
           </Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('breakdown.whatToDoNow')}</Text>
-          <View style={styles.optionsRow}>
-            {[
-              { key: 'ack', label: t('breakdown.ack') },
-              { key: 'onTheWay', label: t('breakdown.onTheWay') },
-              { key: 'needHelp', label: t('breakdown.needHelp') },
-              { key: 'willBeLate', label: t('breakdown.willBeLate') },
-            ].map((opt) => (
-              <TouchableOpacity key={opt.key} style={styles.optionPill} activeOpacity={0.7}>
-                <Text style={styles.optionText}>{opt.label}</Text>
+        {/* What next */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>{t('breakdown.whatToDoNow')}</Text>
+          <View style={s.pills}>
+            {STATUS_OPTIONS.map(({ key, labelKey }) => (
+              <TouchableOpacity key={key} style={s.pill} activeOpacity={0.75}>
+                <Text style={s.pillText}>{t(labelKey)}</Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
 
+        {/* Return */}
         <TouchableOpacity
-          style={styles.backBtn}
+          style={s.returnWrap}
           onPress={() => router.replace({ pathname: '/(driver)/kiosk', params: { tripId: params.tripId } })}
+          activeOpacity={0.7}
         >
-          <Text style={styles.backText}>Return to kiosk</Text>
+          <Text style={s.returnText}>Return to kiosk</Text>
         </TouchableOpacity>
+
       </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.surface },
-  content: {
-    flex: 1, justifyContent: 'center', paddingHorizontal: spacing.xl,
+const s = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: C.bg,
   },
-  card: {
-    backgroundColor: colors.error.bg, borderWidth: 1, borderColor: colors.error.border,
-    borderRadius: radii.md, padding: spacing.xl, alignItems: 'center',
+  layout: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 60,
+    paddingBottom: 48,
+    justifyContent: 'center',
+    gap: 32,
   },
-  icon: { fontSize: 40, marginBottom: spacing.md },
-  title: {
-    fontFamily: typography.family, fontSize: typography.sizes.h2,
-    fontWeight: typography.weights.semibold, color: colors.error.text,
-    textAlign: 'center',
+
+  // Status
+  statusBlock: {
+    gap: 8,
   },
-  type: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    color: colors.text.secondary, marginTop: spacing.micro,
+  statusLabel: {
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.muted,
   },
-  section: { marginTop: spacing.xl },
+  incidentType: {
+    fontFamily: typography.family,
+    fontSize: 28,
+    fontWeight: '700',
+    color: C.ink,
+    letterSpacing: -0.5,
+  },
+  statusNote: {
+    fontFamily: typography.family,
+    fontSize: 15,
+    color: C.muted,
+    lineHeight: 22,
+    marginTop: 2,
+  },
+
+  // Section
+  section: {
+    gap: 12,
+  },
   sectionTitle: {
-    fontFamily: typography.family, fontSize: typography.sizes.h3,
-    fontWeight: typography.weights.semibold, color: colors.text.primary,
-    marginBottom: spacing.sm,
+    fontFamily: typography.family,
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  optionsRow: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs,
+  pills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  optionPill: {
-    backgroundColor: colors.card.bg, borderWidth: 1, borderColor: colors.card.border,
-    borderRadius: radii.pill, paddingVertical: spacing.xs, paddingHorizontal: spacing.md,
+  pill: {
+    backgroundColor: C.pill,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
-  optionText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    fontWeight: typography.weights.medium, color: colors.text.primary,
+  pillText: {
+    fontFamily: typography.family,
+    fontSize: 14,
+    fontWeight: '500',
+    color: C.pillText,
   },
-  backBtn: {
-    marginTop: spacing.xl, paddingVertical: spacing.sm, alignItems: 'center',
+
+  // Return link
+  returnWrap: {
+    alignItems: 'center',
+    paddingVertical: 12,
   },
-  backText: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    fontWeight: typography.weights.medium, color: colors.brand.primary,
+  returnText: {
+    fontFamily: typography.family,
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.link,
   },
 });

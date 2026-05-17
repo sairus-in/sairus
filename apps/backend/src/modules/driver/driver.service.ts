@@ -43,7 +43,7 @@ export async function getTodayAssignment(driverId: string) {
     return {
       trip,
       bus: trip.bus,
-      route: { id: route.id, name: route.name },
+      route: { id: route.id, name: route.name, area: route.area },
       expectedStudents,
       scheduledDeparture,
     };

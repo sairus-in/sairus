@@ -26,6 +26,7 @@ import { importRoutes } from './modules/import/import.routes';
 import { routesRoutes } from './modules/routes/routes.routes';
 import { fleetRoutes } from './modules/fleet/fleet.routes';
 import { driverRoutes } from './modules/driver/driver.routes';
+import { actorHealthRoutes } from './modules/health/actor-health.routes';
 import { MobileJWTPayload, AdminJWTPayload } from 'shared';
 
 type AuthenticatedMobileRequestUser = MobileJWTPayload & { userId: string };
@@ -162,6 +163,8 @@ app.register(importRoutes, { prefix: '/v1/import' });
 app.register(routesRoutes, { prefix: '/v1/routes' });
 app.register(fleetRoutes, { prefix: '/v1/fleet' });
 app.register(driverRoutes, { prefix: '/v1/driver' });
+// Phase 1a Commit 3 — staging-only actor resolver health checks. Delete at end of Phase 1a.
+app.register(actorHealthRoutes, { prefix: '/v1/health' });
 
 // ── Error Handler (must be last) ────────────────────────────────────────
 import { setupErrorHandler } from './lib/error-handler';

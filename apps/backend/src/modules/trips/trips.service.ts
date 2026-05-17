@@ -16,6 +16,7 @@ import { cloudTasksClient, queuePath, BACKEND_URL } from '../../lib/cloud-tasks'
 import { env } from '../../lib/env';
 import { notificationsService } from '../notifications/notifications.service';
 import { tripsRepository } from './trips.repository';
+import { attendanceService } from '../attendance/attendance.service';
 import { io } from '../../websocket/socket';
 
 export class TripsService {
@@ -39,13 +40,17 @@ export class TripsService {
     await setActiveTripCache(trip.busId, trip.id);
 
     // Seed Admin Panel Dashboard Stats
+    const startedAtMs = updated.startedAt?.getTime() ?? Date.now();
     await cacheSAdd('active-trips', tripId);
+    await redis.zadd('active-trips:z', startedAtMs, tripId);
+    await redis.zadd(`active-trips:z:route:${updated.route.id}`, startedAtMs, tripId);
+    await redis.sadd('active-trips:route-ids', updated.route.id);
     await cacheHIncrBy('dashboard:stats', 'activeTrips', 1);
     await cacheHSet(`trip:${tripId}:state`, {
       status: 'ACTIVE', 
       boardedCount: 0, 
       gpsStatus: 'LIVE',
-      startedAt: Date.now(),
+      startedAt: startedAtMs,
       busId: updated.bus.id,
       routeId: updated.route.id,
       busNumber: updated.bus.number, 
@@ -89,6 +94,11 @@ export class TripsService {
 
     // Admin Dashboard Cleanup
     await cacheSRem('active-trips', tripId);
+    await redis.zrem('active-trips:z', tripId);
+    await redis.zrem(`active-trips:z:route:${trip.routeId}`, tripId);
+    if ((await redis.zcard(`active-trips:z:route:${trip.routeId}`)) === 0) {
+      await redis.srem('active-trips:route-ids', trip.routeId);
+    }
     await cacheHIncrBy('dashboard:stats', 'activeTrips', -1);
     await cacheDel(`trip:${tripId}:state`);
 
@@ -122,7 +132,12 @@ export class TripsService {
         outageMinutes
       }));
 
-      await notificationsService.notifyUncheckedStudentsForSelfReport(tripId);
+      const pendingLogs = await tripsRepository.getPendingStudentLogs(tripId);
+      await notificationsService.notifyUncheckedStudents(
+        pendingLogs.map(l => l.userId),
+        trip.bus.number,
+        tripId,
+      );
 
     } else {
       // Normal path — schedule mark-absent immediately
@@ -234,7 +249,7 @@ export class TripsService {
    * Manual mark by driver (for students with dead phones).
    */
   async manualMark(tripId: string, studentId: string, driverId: string, note?: string) {
-    return await tripsRepository.manualMarkAttendance(tripId, studentId, driverId, note);
+    return await attendanceService.driverManualMark(tripId, studentId, driverId, note);
   }
 
   /**
@@ -257,6 +272,14 @@ export class TripsService {
       return (nowMinutes - scheduled) >= 10;
     });
   }
+  async getTripByIdForAdmin(tripId: string) { return tripsRepository.getTripByIdForAdmin(tripId); }
+  async getScheduledTripsForLateCheck(routeIds: string[] | null, today: string) { return tripsRepository.getScheduledTripsForLateCheck(routeIds, today); }
+  async countActiveOfflineTrips(routeIds: string[]) { return tripsRepository.countActiveOfflineTrips(routeIds); }
+  async getTripsByIdsAndRoutes(tripIds: string[], routeIds: string[]) { return tripsRepository.getTripsByIdsAndRoutes(tripIds, routeIds); }
+  async getCompletedOutageTrips(routeIds: string[] | null) { return tripsRepository.getCompletedOutageTrips(routeIds); }
+  async getTripWithBusAndRoute(tripId: string) { return tripsRepository.getTripWithBusAndRoute(tripId); }
+  async getActiveBusIds() { return tripsRepository.getActiveBusIds(); }
+  async getActiveTripByBus(busId: string) { return tripsRepository.getActiveTripByBus(busId); }
 }
 
 export const tripsService = new TripsService();

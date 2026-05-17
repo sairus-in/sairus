@@ -107,16 +107,12 @@ export async function incidentsRoutes(app: FastifyInstance) {
         limit,
       });
 
-      const pagination = {
+      return reply.send(okList(result.incidents, {
         page: 1,
         limit: result.incidents.length,
         total: result.incidents.length,
         hasMore: !!result.nextCursor,
-      };
-
-      return reply.send(
-        okList(result.incidents, pagination, request.id),
-      );
+      }, request.id));
     } catch (err: any) {
       throw new AppError(500, 'LIST_INCIDENTS_FAILED' as any, err.message);
     }

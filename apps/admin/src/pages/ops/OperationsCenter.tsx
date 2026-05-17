@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminImportSessionDetail, AdminImportSessionSummary, AdminPendingAuthUser, AdminRouteSummary } from 'shared';
+import { Icon } from '../../components/design/Icon';
+import { KPIBlock, SectionCard, StateBadge } from '../../components/design/primitives';
 import { api } from '../../lib/api.client';
 import { extractApiError } from '../../lib/api-error';
-import { RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, Loader2, RotateCcw, Save, Play } from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
 
 interface ImportRowFormState {
@@ -17,17 +18,6 @@ interface ImportRowFormState {
   assignedStopId: string;
 }
 
-const statusColors: Record<string, { bg: string; text: string }> = {
-  DONE: { bg: '#ECFDF5', text: '#059669' },
-  DONE_WITH_ERRORS: { bg: '#FEF2F2', text: '#DC2626' },
-  IMPORTING: { bg: '#EFF6FF', text: '#2563EB' },
-  READY_TO_IMPORT: { bg: '#F0FDF4', text: '#16A34A' },
-  VALIDATED_WITH_ERRORS: { bg: '#FFF7ED', text: '#EA580C' },
-  VALIDATING: { bg: '#F5F3FF', text: '#7C3AED' },
-  FAILED: { bg: '#FEF2F2', text: '#DC2626' },
-  CANCELLED: { bg: '#F3F4F6', text: '#6B7280' },
-};
-
 const emptyRowForm: ImportRowFormState = {
   phone: '',
   name: '',
@@ -37,6 +27,37 @@ const emptyRowForm: ImportRowFormState = {
   year: '',
   assignedRouteId: '',
   assignedStopId: '',
+};
+
+const sessionTone = (status: string) => {
+  if (status === 'DONE') return 'ok';
+  if (status === 'DONE_WITH_ERRORS' || status === 'FAILED') return 'err';
+  if (status === 'READY_TO_IMPORT') return 'info';
+  if (status.includes('ERROR')) return 'warn';
+  return 'idle';
+};
+
+const buttonBase: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  borderRadius: 999,
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
+  color: 'var(--ink)',
+  padding: '8px 14px',
+  fontSize: 12,
+  fontWeight: 500,
+};
+
+const fieldStyle: React.CSSProperties = {
+  width: '100%',
+  borderRadius: 12,
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
+  padding: '10px 12px',
+  outline: 'none',
 };
 
 export const OperationsCenter: React.FC = () => {
@@ -162,13 +183,6 @@ export const OperationsCenter: React.FC = () => {
     setRowError(null);
   }, [selectedRow]);
 
-  const getStatusIcon = (status: string) => {
-    if (status === 'DONE') return <CheckCircle size={16} color="#059669" />;
-    if (status.includes('ERROR') || status === 'FAILED') return <XCircle size={16} color="#DC2626" />;
-    if (status === 'IMPORTING' || status === 'VALIDATING') return <Loader2 size={16} color="#2563EB" className="animate-spin" />;
-    return <Clock size={16} color="#6B7280" />;
-  };
-
   const executionFailures = sessionDetail?.rows.filter((row) => row.status === 'FAILED' && row.errorField === 'EXECUTION') ?? [];
   const validationFailures = sessionDetail?.rows.filter((row) => row.status === 'FAILED' && row.errorField === 'VALIDATION') ?? [];
   const pendingRows = sessionDetail?.rows.filter((row) => row.status === 'PENDING') ?? [];
@@ -176,301 +190,336 @@ export const OperationsCenter: React.FC = () => {
   const stopOptions = selectedRoute?.stops ?? [];
   const pageError = sessionsError || sessionDetailError || routesError || pendingAuthError;
   const pageErrorMessage = pageError ? extractApiError(pageError).message : null;
+  const sessionsList = sessions ?? [];
+  const completedSessions = sessionsList.filter((session) => session.status === 'DONE').length;
+  const blockedSessions = sessionsList.filter((session) => session.status === 'DONE_WITH_ERRORS' || session.status === 'FAILED').length;
+  const rowsInFlight = sessionsList.reduce((sum, session) => sum + Math.max(session.totalRows - session.importedCount - session.failedCount, 0), 0);
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '1.5rem', borderBottom: '1px solid #E5E7EB' }}>
-        <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 'bold' }}>Operations Center</h1>
-        <p style={{ margin: '0.25rem 0 0', color: '#6B7280', fontSize: '0.875rem' }}>Monitor background tasks, CSV imports, and auth provisioning</p>
-      </div>
-
-      <div style={{ display: 'flex', borderBottom: '1px solid #E5E7EB' }}>
-        {(['imports', ...(canViewPendingAuth ? (['auth'] as const) : [])] as const).map((value) => (
-          <button
-            key={value}
-            onClick={() => setTab(value)}
-            style={{
-              padding: '0.75rem 1.5rem',
-              border: 'none',
-              background: 'none',
-              borderBottom: tab === value ? '2px solid #2563EB' : '2px solid transparent',
-              fontWeight: tab === value ? 600 : 400,
-              color: tab === value ? '#2563EB' : '#6B7280',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-            }}
-          >
-            {value === 'imports' ? 'CSV Import Sessions' : 'Auth Provisioning'}
-          </button>
-        ))}
-        <div style={{ flex: 1 }} />
-        <button
-          onClick={() => {
-            refetchSessions();
-            if (canViewPendingAuth) {
-              refetchAuth();
-            }
-          }}
-          style={{ padding: '0.5rem 1rem', margin: '0.5rem', border: '1px solid #D1D5DB', borderRadius: '6px', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}
-        >
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
-
-      <div style={{ flex: 1, overflow: 'hidden', padding: '1rem 1.5rem' }}>
-        {pageErrorMessage && (
-          <div style={{ marginBottom: '1rem', padding: '0.9rem 1rem', borderRadius: 12, background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
-            {pageErrorMessage}
+    <div style={{ display: 'grid', gap: 16, minHeight: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 16,
+          alignItems: 'flex-start',
+          padding: 20,
+          border: '1px solid var(--border)',
+          borderRadius: 20,
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,245,242,0.9))',
+        }}
+      >
+        <div>
+          <div className="mono" style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>
+            Data Console
           </div>
-        )}
+          <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 500, letterSpacing: '-0.03em' }}>
+            Operations Center
+          </h1>
+          <div style={{ marginTop: 6, color: 'var(--muted)', maxWidth: 760 }}>
+            Import sessions, correction rows, and auth provisioning are all running against the existing backend queue and audit trail.
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'inline-flex', padding: 3, borderRadius: 999, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            <button
+              type="button"
+              onClick={() => setTab('imports')}
+              style={{ ...buttonBase, border: 0, background: tab === 'imports' ? 'var(--ink)' : 'transparent', color: tab === 'imports' ? 'var(--accent-ink)' : 'var(--muted)' }}
+            >
+              Imports
+            </button>
+            {canViewPendingAuth ? (
+              <button
+                type="button"
+                onClick={() => setTab('auth')}
+                style={{ ...buttonBase, border: 0, background: tab === 'auth' ? 'var(--ink)' : 'transparent', color: tab === 'auth' ? 'var(--accent-ink)' : 'var(--muted)' }}
+              >
+                Auth Provisioning
+              </button>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              refetchSessions();
+              if (canViewPendingAuth) {
+                refetchAuth();
+              }
+            }}
+            style={buttonBase}
+          >
+            <Icon name="refresh" size={14} />
+            Refresh
+          </button>
+        </div>
+      </div>
 
-        {tab === 'imports' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '360px minmax(0, 1fr) 360px', gap: '1rem', height: '100%' }}>
-            <div style={{ overflow: 'auto', display: 'grid', gap: '0.75rem', alignContent: 'start' }}>
+      {pageErrorMessage ? (
+        <div style={{ padding: '12px 14px', borderRadius: 16, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
+          {pageErrorMessage}
+        </div>
+      ) : null}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+        <KPIBlock label="Sessions" value={sessionsList.length} sub="Queued and historical imports" spark={[2, 4, 3, 5, Math.max(sessionsList.length, 1)]} />
+        <KPIBlock label="Completed" value={completedSessions} sub="Clean executions" accent="var(--ok)" spark={[1, 1, 2, 3, Math.max(completedSessions, 1)]} />
+        <KPIBlock label="Blocked" value={blockedSessions} sub="Need row intervention" accent="var(--warn)" spark={[0, 1, 1, 2, Math.max(blockedSessions, 1)]} />
+        <KPIBlock label="Rows In Flight" value={rowsInFlight} sub={tab === 'imports' ? 'Pending execution or validation' : 'Imports tab only'} accent="var(--info)" spark={[8, 6, 9, 7, Math.max(rowsInFlight, 1)]} />
+      </div>
+
+      {tab === 'imports' ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1.3fr) 360px', gap: 16, minHeight: 0 }}>
+          <SectionCard
+            title="Session Feed"
+            subtitle={loadingSessions ? 'Loading queue' : `${sessionsList.length} sessions in scope`}
+          >
+            <div className="scroll" style={{ display: 'grid', gap: 10, maxHeight: 'calc(100vh - 330px)', paddingRight: 4 }}>
               {loadingSessions ? (
-                <p style={{ textAlign: 'center', color: '#9CA3AF', padding: '2rem' }}>Loading sessions...</p>
-              ) : (sessions || []).length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#9CA3AF', padding: '2rem' }}>No import sessions found</p>
+                <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--muted)' }}>Loading sessions…</div>
+              ) : sessionsList.length === 0 ? (
+                <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--muted)' }}>No import sessions yet.</div>
               ) : (
-                (sessions ?? []).map((session) => {
-                  const colors = statusColors[session.status] || { bg: '#F3F4F6', text: '#6B7280' };
+                sessionsList.map((session) => {
                   const progress = session.totalRows > 0 ? Math.round(((session.importedCount + session.failedCount) / session.totalRows) * 100) : 0;
+                  const active = selectedSessionId === session.id;
                   return (
                     <button
                       key={session.id}
                       type="button"
                       onClick={() => setSelectedSessionId(session.id)}
-                      style={{ border: `1px solid ${selectedSessionId === session.id ? '#2563EB' : '#E5E7EB'}`, borderRadius: '8px', padding: '1rem 1.25rem', background: 'white', textAlign: 'left', cursor: 'pointer' }}
+                      style={{
+                        borderRadius: 16,
+                        border: `1px solid ${active ? 'var(--ink)' : 'var(--border)'}`,
+                        background: active ? 'var(--surface-2)' : 'var(--surface)',
+                        padding: 14,
+                        textAlign: 'left',
+                      }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          {getStatusIcon(session.status)}
-                          <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>{session.type}</span>
-                          <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>{session.id.slice(0, 8)}</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+                        <div>
+                          <div className="mono" style={{ fontSize: 12, fontWeight: 500 }}>{session.type}</div>
+                          <div style={{ marginTop: 2, color: 'var(--muted)', fontSize: 11 }}>{session.id.slice(0, 8)}</div>
                         </div>
-                        <span style={{ padding: '0.2rem 0.6rem', borderRadius: '9999px', fontSize: '0.7rem', fontWeight: 600, background: colors.bg, color: colors.text }}>
-                          {session.status.replace(/_/g, ' ')}
-                        </span>
+                        <StateBadge state={session.status} label={session.status.replace(/_/g, ' ')} />
                       </div>
-                      <div style={{ height: '6px', background: '#F3F4F6', borderRadius: '3px', overflow: 'hidden', marginBottom: '0.5rem' }}>
-                        <div style={{ height: '100%', width: `${progress}%`, background: session.failedCount > 0 ? '#F59E0B' : '#10B981', borderRadius: '3px', transition: 'width 0.3s' }} />
+                      <div style={{ height: 6, background: 'var(--surface-3)', borderRadius: 999, overflow: 'hidden', marginBottom: 10 }}>
+                        <div
+                          style={{
+                            width: `${progress}%`,
+                            height: '100%',
+                            background: sessionTone(session.status) === 'err' ? 'var(--warn)' : 'var(--ok)',
+                            borderRadius: 999,
+                            transition: 'width var(--t)',
+                          }}
+                        />
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#6B7280' }}>
-                        <span>{session.importedCount} imported | {session.failedCount} failed | {session.totalRows} total</span>
-                        <span>{new Date(session.startedAt).toLocaleString()}</span>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, fontSize: 11 }}>
+                        <div><span className="muted">Imported</span><div className="mono">{session.importedCount}</div></div>
+                        <div><span className="muted">Failed</span><div className="mono">{session.failedCount}</div></div>
+                        <div><span className="muted">Rows</span><div className="mono">{session.totalRows}</div></div>
                       </div>
                     </button>
                   );
                 })
               )}
             </div>
+          </SectionCard>
 
-            <div style={{ border: '1px solid #E5E7EB', borderRadius: '8px', background: 'white', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              {!selectedSessionId ? (
-                <div style={{ padding: '2rem', color: '#6B7280' }}>Select an import session to inspect row-level outcomes.</div>
-              ) : loadingSessionDetail ? (
-                <div style={{ padding: '2rem', color: '#6B7280' }}>Loading session detail...</div>
-              ) : sessionDetail ? (
-                <>
-                  <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E5E7EB', display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '1rem' }}>Session {sessionDetail.id.slice(0, 8)}</div>
-                      <div style={{ color: '#6B7280', fontSize: '0.82rem' }}>{sessionDetail.type} | {sessionDetail.status.replace(/_/g, ' ')}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        onClick={() => executePendingRows.mutate(sessionDetail.id)}
-                        disabled={executePendingRows.isPending || pendingRows.length === 0}
-                        style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', border: 'none', borderRadius: '6px', background: pendingRows.length > 0 ? '#16A34A' : '#CBD5E1', color: 'white', padding: '0.65rem 0.9rem', cursor: pendingRows.length > 0 ? 'pointer' : 'not-allowed', fontWeight: 700 }}
-                      >
-                        <Play size={14} /> Execute pending rows
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => retryFailedRows.mutate(sessionDetail.id)}
-                        disabled={retryFailedRows.isPending || executionFailures.length === 0}
-                        style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', border: 'none', borderRadius: '6px', background: executionFailures.length > 0 ? '#2563EB' : '#CBD5E1', color: 'white', padding: '0.65rem 0.9rem', cursor: executionFailures.length > 0 ? 'pointer' : 'not-allowed', fontWeight: 700 }}
-                      >
-                        <RotateCcw size={14} /> Retry execution failures
-                      </button>
-                    </div>
-                  </div>
+          <SectionCard
+            title={selectedSessionId ? `Session ${selectedSessionId.slice(0, 8)}` : 'Row Detail'}
+            subtitle={selectedSessionId ? 'Inspect row-level validation and execution state' : 'Pick a session from the feed'}
+            actions={sessionDetail ? <StateBadge state={sessionDetail.status} label={sessionDetail.status.replace(/_/g, ' ')} /> : undefined}
+          >
+            {!selectedSessionId ? (
+              <div style={{ padding: '32px 0', color: 'var(--muted)' }}>Select an import session to inspect row outcomes.</div>
+            ) : loadingSessionDetail ? (
+              <div style={{ padding: '32px 0', color: 'var(--muted)' }}>Loading session detail…</div>
+            ) : sessionDetail ? (
+              <div style={{ display: 'grid', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+                  <div style={{ padding: 12, borderRadius: 14, background: 'var(--surface-2)' }}><div className="muted">Total</div><div className="mono" style={{ fontSize: 20, marginTop: 4 }}>{sessionDetail.totalRows}</div></div>
+                  <div style={{ padding: 12, borderRadius: 14, background: 'var(--ok-soft)' }}><div className="muted">Imported</div><div className="mono" style={{ fontSize: 20, marginTop: 4, color: 'var(--ok)' }}>{sessionDetail.importedCount}</div></div>
+                  <div style={{ padding: 12, borderRadius: 14, background: 'var(--warn-soft)' }}><div className="muted">Validation Fails</div><div className="mono" style={{ fontSize: 20, marginTop: 4, color: 'var(--warn)' }}>{validationFailures.length}</div></div>
+                  <div style={{ padding: 12, borderRadius: 14, background: 'var(--info-soft)' }}><div className="muted">Pending</div><div className="mono" style={{ fontSize: 20, marginTop: 4, color: 'var(--info)' }}>{pendingRows.length}</div></div>
+                </div>
 
-                  <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E5E7EB', display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.75rem' }}>
-                    <div>
-                      <div style={{ color: '#6B7280', fontSize: '0.78rem' }}>Total rows</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{sessionDetail.totalRows}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#6B7280', fontSize: '0.78rem' }}>Imported</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#059669' }}>{sessionDetail.importedCount}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#6B7280', fontSize: '0.78rem' }}>Validation fails</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#EA580C' }}>{validationFailures.length}</div>
-                    </div>
-                    <div>
-                      <div style={{ color: '#6B7280', fontSize: '0.78rem' }}>Pending</div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#2563EB' }}>{pendingRows.length}</div>
-                    </div>
-                  </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => executePendingRows.mutate(sessionDetail.id)}
+                    disabled={executePendingRows.isPending || pendingRows.length === 0}
+                    style={{ ...buttonBase, background: pendingRows.length > 0 ? 'var(--ink)' : 'var(--surface-2)', color: pendingRows.length > 0 ? 'var(--accent-ink)' : 'var(--muted)', borderColor: pendingRows.length > 0 ? 'var(--ink)' : 'var(--border)' }}
+                  >
+                    <Icon name="play" size={12} />
+                    Execute Pending
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => retryFailedRows.mutate(sessionDetail.id)}
+                    disabled={retryFailedRows.isPending || executionFailures.length === 0}
+                    style={buttonBase}
+                  >
+                    <Icon name="refresh" size={12} />
+                    Retry Failures
+                  </button>
+                </div>
 
-                  <div style={{ flex: 1, overflow: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#F9FAFB', zIndex: 1 }}>
-                        <tr>
-                          <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.82rem' }}>Row</th>
-                          <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.82rem' }}>Status</th>
-                          <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.82rem' }}>Phone</th>
-                          <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.82rem' }}>Reason</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sessionDetail.rows.map((row) => (
-                          <tr key={row.id} onClick={() => setSelectedRowId(row.id)} style={{ borderBottom: '1px solid #E5E7EB', cursor: 'pointer', background: selectedRowId === row.id ? '#EFF6FF' : 'white' }}>
-                            <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace' }}>{row.rowNumber}</td>
-                            <td style={{ padding: '0.75rem 1rem' }}>
-                              <span style={{ padding: '0.2rem 0.55rem', borderRadius: '9999px', fontSize: '0.72rem', fontWeight: 700, background: row.status === 'IMPORTED' ? '#ECFDF5' : row.status === 'FAILED' ? '#FEF2F2' : '#EFF6FF', color: row.status === 'IMPORTED' ? '#047857' : row.status === 'FAILED' ? '#B91C1C' : '#1D4ED8' }}>
-                                {row.status}
-                              </span>
-                            </td>
-                            <td style={{ padding: '0.75rem 1rem', color: '#475569' }}>{String(row.rowData.phone ?? '-')}</td>
-                            <td style={{ padding: '0.75rem 1rem', color: '#B91C1C', fontSize: '0.84rem' }}>{row.errorReason || '-'}</td>
-                          </tr>
+                <div className="scroll" style={{ border: '1px solid var(--border)', borderRadius: 16, maxHeight: 'calc(100vh - 520px)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)' }}>
+                      <tr>
+                        {['Row', 'Status', 'Phone', 'Reason'].map((label) => (
+                          <th key={label} style={{ padding: '12px 14px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid var(--divider)' }}>
+                            {label}
+                          </th>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : (
-                <div style={{ padding: '2rem', color: '#B91C1C' }}>Import session not found.</div>
-              )}
-            </div>
-
-            <div style={{ border: '1px solid #E5E7EB', borderRadius: '8px', background: 'white', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #E5E7EB' }}>
-                <div style={{ fontWeight: 700, fontSize: '1rem' }}>Row Correction</div>
-                <div style={{ color: '#6B7280', fontSize: '0.82rem', marginTop: '0.25rem' }}>
-                  Correct failed rows, save them back into the session, then execute pending rows.
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sessionDetail.rows.map((row) => {
+                        const active = row.id === selectedRowId;
+                        return (
+                          <tr key={row.id} onClick={() => setSelectedRowId(row.id)} style={{ background: active ? 'var(--surface-2)' : 'transparent', cursor: 'pointer' }}>
+                            <td className="mono" style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>{row.rowNumber}</td>
+                            <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>
+                              <StateBadge state={row.status} label={row.status} />
+                            </td>
+                            <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>{String(row.rowData.phone ?? '-')}</td>
+                            <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)', color: row.errorReason ? 'var(--err)' : 'var(--muted)' }}>
+                              {row.errorReason || 'No issues'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-
-              <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: '0.75rem', overflow: 'auto' }}>
-                {!selectedRow ? (
-                  <div style={{ color: '#6B7280', fontSize: '0.9rem' }}>Select a row from the session to review or correct it.</div>
-                ) : (
-                  <>
-                    <div style={{ padding: '0.75rem 0.85rem', borderRadius: '8px', background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-                      <div style={{ fontSize: '0.78rem', color: '#64748B' }}>Selected Row</div>
-                      <div style={{ marginTop: '0.25rem', fontWeight: 700 }}>Row {selectedRow.rowNumber}</div>
-                      <div style={{ marginTop: '0.2rem', color: selectedRow.status === 'FAILED' ? '#B91C1C' : '#1D4ED8', fontSize: '0.82rem' }}>
-                        {selectedRow.status} {selectedRow.errorReason ? `| ${selectedRow.errorReason}` : ''}
-                      </div>
-                    </div>
-
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Phone</span>
-                      <input value={rowForm.phone} onChange={(event) => setRowForm((current) => ({ ...current, phone: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-                    </label>
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Name</span>
-                      <input value={rowForm.name} onChange={(event) => setRowForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-                    </label>
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Roll Number</span>
-                      <input value={rowForm.rollNumber} onChange={(event) => setRowForm((current) => ({ ...current, rollNumber: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-                    </label>
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Email</span>
-                      <input value={rowForm.email} onChange={(event) => setRowForm((current) => ({ ...current, email: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-                    </label>
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Department</span>
-                      <input value={rowForm.department} onChange={(event) => setRowForm((current) => ({ ...current, department: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-                    </label>
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Year</span>
-                      <input type="number" min={1} max={6} value={rowForm.year} onChange={(event) => setRowForm((current) => ({ ...current, year: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} />
-                    </label>
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Assigned Route</span>
-                      <select value={rowForm.assignedRouteId} onChange={(event) => setRowForm((current) => ({ ...current, assignedRouteId: event.target.value, assignedStopId: '' }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }}>
-                        <option value="">No assignment</option>
-                        {routes.map((route) => (
-                          <option key={route.id} value={route.id}>{route.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label style={{ display: 'grid', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Assigned Stop</span>
-                      <select value={rowForm.assignedStopId} onChange={(event) => setRowForm((current) => ({ ...current, assignedStopId: event.target.value }))} style={{ padding: '0.65rem 0.75rem', borderRadius: '6px', border: '1px solid #D1D5DB' }} disabled={!rowForm.assignedRouteId}>
-                        <option value="">{rowForm.assignedRouteId ? 'Select stop' : 'Select route first'}</option>
-                        {stopOptions.map((routeStop) => (
-                          <option key={routeStop.stop.id} value={routeStop.stop.id}>{routeStop.stop.name}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    {rowError && (
-                      <div style={{ padding: '0.8rem', borderRadius: '6px', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', fontSize: '0.85rem' }}>
-                        {rowError}
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => selectedSessionId && selectedRowId && saveRowPatch.mutate({ sessionId: selectedSessionId, rowId: selectedRowId, payload: rowForm })}
-                      disabled={saveRowPatch.isPending || !rowForm.phone.trim() || !rowForm.name.trim() || !rowForm.rollNumber.trim()}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', border: 'none', borderRadius: '8px', background: '#111827', color: 'white', padding: '0.85rem 1rem', fontWeight: 700, cursor: 'pointer' }}
-                    >
-                      <Save size={16} /> Save row correction
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {tab === 'auth' && (
-          <div>
-            {loadingAuth ? (
-              <p style={{ textAlign: 'center', color: '#9CA3AF', padding: '2rem' }}>Loading...</p>
-            ) : (pendingUsers || []).length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#9CA3AF', padding: '2rem' }}>No pending auth provisioning users</p>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                <thead style={{ backgroundColor: '#F9FAFB' }}>
+              <div style={{ padding: '32px 0', color: 'var(--err)' }}>Import session not found.</div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Row Correction"
+            subtitle={selectedRow ? `Row ${selectedRow.rowNumber} selected` : 'Select a row to patch and re-run'}
+          >
+            {!selectedRow ? (
+              <div style={{ padding: '32px 0', color: 'var(--muted)' }}>Choose a row from the middle pane to edit its normalized values.</div>
+            ) : (
+              <div className="scroll" style={{ display: 'grid', gap: 12, maxHeight: 'calc(100vh - 320px)', paddingRight: 4 }}>
+                <div style={{ padding: 12, borderRadius: 14, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>STATUS</div>
+                  <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <StateBadge state={selectedRow.status} label={selectedRow.status} />
+                    <span style={{ color: selectedRow.errorReason ? 'var(--err)' : 'var(--muted)', fontSize: 12 }}>{selectedRow.errorReason || 'Ready to execute'}</span>
+                  </div>
+                </div>
+
+                {[
+                  ['Phone', 'phone'],
+                  ['Name', 'name'],
+                  ['Roll Number', 'rollNumber'],
+                  ['Email', 'email'],
+                  ['Department', 'department'],
+                  ['Year', 'year'],
+                ].map(([label, key]) => (
+                  <label key={key} style={{ display: 'grid', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
+                    <input
+                      value={rowForm[key as keyof ImportRowFormState]}
+                      onChange={(event) => setRowForm((current) => ({ ...current, [key]: event.target.value }))}
+                      style={fieldStyle}
+                    />
+                  </label>
+                ))}
+
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assigned Route</span>
+                  <select
+                    value={rowForm.assignedRouteId}
+                    onChange={(event) => setRowForm((current) => ({ ...current, assignedRouteId: event.target.value, assignedStopId: '' }))}
+                    style={fieldStyle}
+                  >
+                    <option value="">No assignment</option>
+                    {routes.map((route) => (
+                      <option key={route.id} value={route.id}>{route.name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assigned Stop</span>
+                  <select
+                    value={rowForm.assignedStopId}
+                    onChange={(event) => setRowForm((current) => ({ ...current, assignedStopId: event.target.value }))}
+                    style={fieldStyle}
+                    disabled={!rowForm.assignedRouteId}
+                  >
+                    <option value="">{rowForm.assignedRouteId ? 'Select stop' : 'Select route first'}</option>
+                    {stopOptions.map((routeStop) => (
+                      <option key={routeStop.stop.id} value={routeStop.stop.id}>{routeStop.stop.name}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {rowError ? (
+                  <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
+                    {rowError}
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => selectedSessionId && selectedRowId && saveRowPatch.mutate({ sessionId: selectedSessionId, rowId: selectedRowId, payload: rowForm })}
+                  disabled={saveRowPatch.isPending || !rowForm.phone.trim() || !rowForm.name.trim() || !rowForm.rollNumber.trim()}
+                  style={{ ...buttonBase, width: '100%', background: 'var(--ink)', color: 'var(--accent-ink)', borderColor: 'var(--ink)', paddingBlock: 12 }}
+                >
+                  <Icon name="check" size={12} />
+                  Save Row Correction
+                </button>
+              </div>
+            )}
+          </SectionCard>
+        </div>
+      ) : (
+        <SectionCard title="Auth Provisioning Queue" subtitle={loadingAuth ? 'Loading pending users' : `${pendingUsers?.length ?? 0} users waiting on auth completion`}>
+          {loadingAuth ? (
+            <div style={{ padding: '24px 0', color: 'var(--muted)' }}>Loading provisioning queue…</div>
+          ) : !(pendingUsers?.length) ? (
+            <div style={{ padding: '24px 0', color: 'var(--muted)' }}>No pending auth provisioning users.</div>
+          ) : (
+            <div className="scroll" style={{ border: '1px solid var(--border)', borderRadius: 16, maxHeight: 'calc(100vh - 340px)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)' }}>
                   <tr>
-                    <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.85rem' }}>Name</th>
-                    <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.85rem' }}>Phone</th>
-                    <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.85rem' }}>Status</th>
-                    <th style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600, fontSize: '0.85rem' }}>Error</th>
+                    {['Name', 'Phone', 'Status', 'Error'].map((label) => (
+                      <th key={label} style={{ padding: '12px 14px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid var(--divider)' }}>
+                        {label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {(pendingUsers || []).map((user) => (
-                    <tr key={user.id} style={{ borderBottom: '1px solid #E5E7EB' }}>
-                      <td style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>{user.name}</td>
-                      <td style={{ padding: '0.75rem 1rem', color: '#4B5563' }}>{user.phone}</td>
-                      <td style={{ padding: '0.75rem 1rem' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.2rem 0.6rem', borderRadius: '9999px', fontSize: '0.7rem', fontWeight: 600, background: user.authStatus === 'AUTH_PROVISION_FAILED' ? '#FEF2F2' : '#FFF7ED', color: user.authStatus === 'AUTH_PROVISION_FAILED' ? '#DC2626' : '#EA580C' }}>
-                          {user.authStatus === 'AUTH_PROVISION_FAILED' ? <XCircle size={12} /> : <AlertTriangle size={12} />}
-                          {user.authStatus.replace(/_/g, ' ')}
-                        </span>
+                  {pendingUsers.map((user) => (
+                    <tr key={user.id}>
+                      <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>{user.name}</td>
+                      <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>{user.phone}</td>
+                      <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>
+                        <StateBadge state={user.authStatus} label={user.authStatus.replace(/_/g, ' ')} />
                       </td>
-                      <td style={{ padding: '0.75rem 1rem', color: '#EF4444', fontSize: '0.85rem', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {user.authProvisionError || '-'}
+                      <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)', color: user.authProvisionError ? 'var(--err)' : 'var(--muted)' }}>
+                        {user.authProvisionError || 'No error message'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            )}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </SectionCard>
+      )}
     </div>
   );
 };

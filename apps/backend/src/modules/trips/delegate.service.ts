@@ -8,8 +8,14 @@ import crypto from 'crypto';
 import { notificationsService } from '../notifications/notifications.service';
 import { logger } from '../../lib/logger';
 import { metrics } from '../../lib/metrics';
+import { circuitExecute } from '../../lib/redis-circuit';
 
 const ALLOWED_DELEGATE_ROLES = ['STAFF', 'NCC_OFFICER', 'FACULTY', 'COORDINATOR', 'TRANSPORT_OFFICER', 'MANAGEMENT'] as const;
+const DELEGATE_MAX_DISTANCE_METRES = 200;
+const DELEGATE_SESSION_TTL_SECONDS = 12 * 60 * 60;
+const WARNING_PUSH_WINDOW_SECONDS = 60;
+const WARNING_COORDINATOR_MAX_PER_WINDOW = 3;
+const WARNING_COORDINATOR_WINDOW_SECONDS = 10 * 60;
 
 export class DelegateService {
 
@@ -39,8 +45,8 @@ export class DelegateService {
     if (lastPosStr) {
       const busPos = JSON.parse(lastPosStr);
       distance = getDistanceMetres(lat, lon, busPos.lat, busPos.lon);
-      if (distance > 200) {
-        return { eligible: false, reason: 'NOT_NEAR_BUS', distance, maxAllowed: 200 };
+      if (distance > DELEGATE_MAX_DISTANCE_METRES) {
+        return { eligible: false, reason: 'NOT_NEAR_BUS', distance, maxAllowed: DELEGATE_MAX_DISTANCE_METRES };
       }
     } else {
       const routeAssignment = await prisma.routeAssignment.findFirst({
@@ -51,7 +57,7 @@ export class DelegateService {
       }
     }
 
-    return { eligible: true, gpsStatus, distance, maxAllowed: 200 };
+    return { eligible: true, gpsStatus, distance, maxAllowed: DELEGATE_MAX_DISTANCE_METRES };
   }
 
   async activateDelegation(tripId: string, userId: string, lat: number, lon: number, delegateType: 'GPS' | 'KIOSK' | 'BOTH') {
@@ -101,8 +107,8 @@ export class DelegateService {
       if (lastPosStr) {
         const busPos = JSON.parse(lastPosStr);
         distanceFromBus = Math.round(getDistanceMetres(lat, lon, busPos.lat, busPos.lon));
-        if (distanceFromBus > 200) {
-          throw new ForbiddenError('NOT_NEAR_BUS', { distance: distanceFromBus, maxAllowed: 200 });
+        if (distanceFromBus > DELEGATE_MAX_DISTANCE_METRES) {
+          throw new ForbiddenError('NOT_NEAR_BUS', { distance: distanceFromBus, maxAllowed: DELEGATE_MAX_DISTANCE_METRES });
         }
         activationMethod = 'GEOFENCE';
       } else {
@@ -149,7 +155,7 @@ export class DelegateService {
 
       await redis.setex(
         `trip:delegate:${tripId}`,
-        12 * 60 * 60,
+        DELEGATE_SESSION_TTL_SECONDS,
         JSON.stringify({
           userId, delegateType, operationId,
           activatedAt: Date.now(),
@@ -157,14 +163,20 @@ export class DelegateService {
         })
       );
 
-      await redis.expire(lockKey, 12 * 60 * 60);
+      await redis.expire(lockKey, DELEGATE_SESSION_TTL_SECONDS);
 
-      if (firebaseAdmin) {
-        await firebaseAdmin.database().ref(`/buses/${trip.busId}`).update({
-          delegateActive: true,
-          delegateSource: user.role,
-          gpsStatus: 'LIVE',
-        });
+      const firebase = firebaseAdmin;
+      if (firebase) {
+        await circuitExecute(
+          () => firebase.database().ref(`/buses/${trip.busId}`).update({
+            delegateActive: true,
+            delegateSource: user.role,
+            gpsStatus: 'LIVE',
+          }),
+          'skip_silent',
+          async () => undefined,
+          'firebase-rtdb-delegate',
+        );
       }
 
       if (io) {
@@ -219,10 +231,16 @@ export class DelegateService {
     await redis.del(`trip:delegate:activate:${tripId}`);
     await redis.del(`trip:delegate:heartbeat:${tripId}`);
 
-    if (firebaseAdmin) {
-      await firebaseAdmin.database().ref(`/buses/${activeDelegate.busId}`).update({
-        delegateActive: false, delegateSource: null, source: 'DRIVER'
-      });
+    const firebase = firebaseAdmin;
+    if (firebase) {
+      await circuitExecute(
+        () => firebase.database().ref(`/buses/${activeDelegate.busId}`).update({
+          delegateActive: false, delegateSource: null, source: 'DRIVER',
+        }),
+        'skip_silent',
+        async () => undefined,
+        'firebase-rtdb-delegate',
+      );
     }
 
     if (io) {
@@ -273,7 +291,7 @@ export class DelegateService {
     const pushAllowed = await redis.setnx(rateLimitPushKey, '1');
     
     if (pushAllowed) {
-      await redis.expire(rateLimitPushKey, 60);
+      await redis.expire(rateLimitPushKey, WARNING_PUSH_WINDOW_SECONDS);
       
       if (severity === 'HIGH' || severity === 'CRITICAL') {
         await notificationsService.dispatch(
@@ -295,9 +313,9 @@ export class DelegateService {
       const countStr = await redis.get(rateLimitCoordKey);
       let count = countStr ? parseInt(countStr, 10) : 0;
       
-      if (count < 3) {
+      if (count < WARNING_COORDINATOR_MAX_PER_WINDOW) {
         await redis.incr(rateLimitCoordKey);
-        if (count === 0) await redis.expire(rateLimitCoordKey, 600); // 10 minutes
+        if (count === 0) await redis.expire(rateLimitCoordKey, WARNING_COORDINATOR_WINDOW_SECONDS);
         
         logger.warn({
           event: 'delegate_warning_escalation_eligible',

@@ -4,6 +4,8 @@ import { writeAuthAuditEvent } from './auth-audit';
 import { logger } from './logger';
 import { prisma } from './prisma';
 import { redis } from './redis';
+import { scanKeys } from './redis-scan';
+import { actorCache } from '../spine/auth';
 
 async function bestEffortDelete(key: string): Promise<void> {
   try {
@@ -37,6 +39,7 @@ export const revokeAllSessions = async (userId: string, reason: string, actorId?
   });
 
   await invalidateMobileAuthCache(userId);
+  await actorCache.invalidate('mobile', userId);
   await bestEffortDelete(`jwt:blacklist:${userId}`);
 
   void writeAuthAuditEvent({
@@ -58,6 +61,7 @@ export const forceReloginAfter = async (userIds: string[], afterTimestamp: Date,
   await Promise.all(
     userIds.map(async (id) => {
       await invalidateMobileAuthCache(id);
+      await actorCache.invalidate('mobile', id);
       await bestEffortSetex(`jwt:blacklist:${id}`, 24 * 60 * 60, '1');
     }),
   );
@@ -71,7 +75,7 @@ export const forceReloginAfter = async (userIds: string[], afterTimestamp: Date,
 
 export const wipeAllMobileAuthCaches = async (): Promise<number> => {
   try {
-    const authKeys = await redis.keys('auth:user:*');
+    const authKeys = await scanKeys('auth:user:*');
     if (authKeys.length === 0) {
       return 0;
     }

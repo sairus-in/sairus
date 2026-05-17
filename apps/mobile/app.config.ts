@@ -36,11 +36,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     scheme: 'busapp',
     orientation: 'portrait',
     icon: './assets/icon.png',
-    userInterfaceStyle: 'light',
+    userInterfaceStyle: 'automatic',
     splash: {
       image: './assets/splash-icon.png',
       resizeMode: 'contain',
-      backgroundColor: '#1E3A8A',
+      backgroundColor: '#356C8F',
     },
     ios: {
       supportsTablet: false,
@@ -58,7 +58,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       package: androidPackage,
       adaptiveIcon: {
-        backgroundColor: '#1E3A8A',
+        backgroundColor: '#356C8F',
         foregroundImage: './assets/android-icon-foreground.png',
         monochromeImage: './assets/android-icon-monochrome.png',
       },
@@ -94,7 +94,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-notifications',
         {
           icon: './assets/android-icon-monochrome.png',
-          color: '#1E3A8A',
+          color: '#356C8F',
         },
       ],
     ],
@@ -112,7 +112,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     updates: projectId
       ? {
           url: `https://u.expo.dev/${projectId}`,
-          enabled: true,
+          enabled: false,
           fallbackToCacheTimeout: 0,
         }
       : {

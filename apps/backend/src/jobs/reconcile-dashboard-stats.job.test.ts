@@ -5,6 +5,7 @@ const mockTripFindMany = vi.fn();
 const mockAttendanceCount = vi.fn();
 const mockCorrectionCount = vi.fn();
 const mockRedisHGet = vi.fn();
+const mockRedisSMembers = vi.fn();
 const mockPipelineExec = vi.fn();
 const mockWithLock = vi.fn();
 
@@ -12,6 +13,7 @@ const pipelineState = {
   hset: vi.fn(),
   del: vi.fn(),
   sadd: vi.fn(),
+  zadd: vi.fn(),
   exec: mockPipelineExec,
 };
 
@@ -36,6 +38,7 @@ vi.mock('../lib/prisma', () => ({
 vi.mock('../lib/redis', () => ({
   redis: {
     hget: mockRedisHGet,
+    smembers: mockRedisSMembers,
     pipeline: mockRedisPipeline,
   },
 }));
@@ -58,12 +61,17 @@ describe('reconcileDashboardStats', () => {
     mockTripCount.mockResolvedValue(2);
     mockAttendanceCount.mockResolvedValue(7);
     mockCorrectionCount.mockResolvedValue(3);
-    mockTripFindMany.mockResolvedValue([{ id: 'trip_live_1' }, { id: 'trip_live_2' }]);
+    mockTripFindMany.mockResolvedValue([
+      { id: 'trip_live_1', routeId: 'route_1', startedAt: new Date('2026-04-28T05:00:00.000Z') },
+      { id: 'trip_live_2', routeId: 'route_2', startedAt: new Date('2026-04-28T05:05:00.000Z') },
+    ]);
     mockRedisHGet.mockResolvedValue('4');
+    mockRedisSMembers.mockResolvedValue(['stale']);
     mockPipelineExec.mockResolvedValue([]);
     pipelineState.hset.mockReturnValue(pipelineState);
     pipelineState.del.mockReturnValue(pipelineState);
     pipelineState.sadd.mockReturnValue(pipelineState);
+    pipelineState.zadd.mockReturnValue(pipelineState);
     mockWithLock.mockImplementation(async (_resource: string, _ttlMs: number, work: () => Promise<void>) => {
       await work();
       return true;
@@ -88,7 +96,15 @@ describe('reconcileDashboardStats', () => {
       gpsOffline: '4',
     });
     expect(pipelineState.del).toHaveBeenCalledWith('active-trips');
+    expect(pipelineState.del).toHaveBeenCalledWith('active-trips:z');
+    expect(pipelineState.del).toHaveBeenCalledWith('active-trips:route-ids');
+    expect(pipelineState.del).toHaveBeenCalledWith('active-trips:z:route:stale');
     expect(pipelineState.sadd).toHaveBeenCalledWith('active-trips', 'trip_live_1', 'trip_live_2');
+    expect(pipelineState.sadd).toHaveBeenCalledWith('active-trips:route-ids', 'route_1', 'route_2');
+    expect(pipelineState.zadd).toHaveBeenCalledWith('active-trips:z', Date.parse('2026-04-28T05:00:00.000Z'), 'trip_live_1');
+    expect(pipelineState.zadd).toHaveBeenCalledWith('active-trips:z:route:route_1', Date.parse('2026-04-28T05:00:00.000Z'), 'trip_live_1');
+    expect(pipelineState.zadd).toHaveBeenCalledWith('active-trips:z', Date.parse('2026-04-28T05:05:00.000Z'), 'trip_live_2');
+    expect(pipelineState.zadd).toHaveBeenCalledWith('active-trips:z:route:route_2', Date.parse('2026-04-28T05:05:00.000Z'), 'trip_live_2');
     expect(mockPipelineExec).toHaveBeenCalledTimes(1);
     expect(mockLoggerInfo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -120,7 +136,10 @@ describe('reconcileDashboardStats', () => {
       gpsOffline: '4',
     });
     expect(pipelineState.del).toHaveBeenCalledWith('active-trips');
+    expect(pipelineState.del).toHaveBeenCalledWith('active-trips:z');
+    expect(pipelineState.del).toHaveBeenCalledWith('active-trips:route-ids');
     expect(pipelineState.sadd).not.toHaveBeenCalled();
+    expect(pipelineState.zadd).not.toHaveBeenCalled();
     expect(mockPipelineExec).toHaveBeenCalledTimes(1);
   });
 

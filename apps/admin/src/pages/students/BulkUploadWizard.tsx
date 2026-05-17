@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import Papa from 'papaparse';
 import { AdminImportExecuteResponse, AdminImportPreviewResponse } from 'shared';
-import { Upload, AlertTriangle, CheckCircle, ArrowRight, Loader2, X } from 'lucide-react';
 import { api } from '../../lib/api.client';
 import { extractApiError } from '../../lib/api-error';
 
@@ -18,6 +17,8 @@ type ParsedStudentImportRow = {
   assignedStopId?: string;
 };
 
+const stepLabels: WizardStep[] = ['SELECT', 'LOCAL_VALIDATE', 'API_PREVIEW', 'EXECUTING', 'DONE'];
+
 export const BulkUploadWizard: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [step, setStep] = useState<WizardStep>('SELECT');
   const [file, setFile] = useState<File | null>(null);
@@ -26,8 +27,6 @@ export const BulkUploadWizard: React.FC<{ onClose: () => void }> = ({ onClose })
   const [execResult, setExecResult] = useState<AdminImportExecuteResponse | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
-  
-
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -39,12 +38,11 @@ export const BulkUploadWizard: React.FC<{ onClose: () => void }> = ({ onClose })
     if (!file) return;
     setStep('LOCAL_VALIDATE');
     setIsProcessing(true);
-    
+
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        // Map CSV rows to expected DB mapping DTO
         const formatted = results.data.map((row) => {
           const csvRow = row as CsvStudentRow;
           return {
@@ -64,7 +62,7 @@ export const BulkUploadWizard: React.FC<{ onClose: () => void }> = ({ onClose })
       error: (error) => {
         setErrorDetails(error.message);
         setIsProcessing(false);
-      }
+      },
     });
   };
 
@@ -74,7 +72,7 @@ export const BulkUploadWizard: React.FC<{ onClose: () => void }> = ({ onClose })
     try {
       const result = await api.post<AdminImportPreviewResponse>('/v1/import/validate', {
         fileChecksum: file?.name || 'unknown',
-        rows: parsedRows
+        rows: parsedRows,
       });
       setPreviewResult(result);
     } catch (error) {
@@ -100,179 +98,163 @@ export const BulkUploadWizard: React.FC<{ onClose: () => void }> = ({ onClose })
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col max-h-[90vh] overflow-hidden">
-        
-        {/* Header */}
-        <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100">
-          <h2 className="text-xl font-semibold text-gray-900">Bulk Student Import</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={24} />
+    <div style={{ position: 'fixed', inset: 0, zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(18,18,20,0.38)', backdropFilter: 'blur(4px)' }}>
+      <div style={{ width: 'min(880px, 96vw)', maxHeight: '90vh', overflow: 'hidden', borderRadius: 24, border: '1px solid var(--border-2)', background: 'var(--surface)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '18px 20px', borderBottom: '1px solid var(--divider)' }}>
+          <div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Bulk Import</div>
+            <h2 style={{ margin: '8px 0 0', fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 500 }}>Student CSV Import</h2>
+          </div>
+          <button type="button" onClick={onClose} style={{ width: 36, height: 36, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+            ×
           </button>
         </div>
 
-        {/* Wizard Progress Track */}
-        <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-b border-gray-100">
-          {['SELECT', 'LOCAL_VALIDATE', 'API_PREVIEW', 'EXECUTING', 'DONE'].map((s, idx) => (
-            <div key={s} className={`flex items-center text-sm font-medium ${step === s ? 'text-blue-600' : 'text-gray-400'}`}>
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center mr-2 border ${step === s ? 'border-blue-600 bg-blue-50' : 'border-gray-300'}`}>
-                {idx + 1}
-              </span>
-              {s.replace('_', ' ')}
-            </div>
-          ))}
+        <div style={{ display: 'flex', gap: 8, padding: '14px 20px', borderBottom: '1px solid var(--divider)', background: 'var(--surface-2)' }}>
+          {stepLabels.map((label, index) => {
+            const active = label === step;
+            return (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, color: active ? 'var(--ink)' : 'var(--muted)' }}>
+                <span style={{ width: 24, height: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', border: `1px solid ${active ? 'var(--ink)' : 'var(--border)'}`, background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--accent-ink)' : 'inherit', fontSize: 11 }}>
+                  {index + 1}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 500 }}>{label.replace('_', ' ')}</span>
+              </div>
+            );
+          })}
         </div>
 
-        <div className="px-6 py-6 overflow-y-auto flex-1">
-          {errorDetails && (
-            <div className="mb-6 bg-red-50 text-red-700 p-4 rounded-lg flex items-start">
-              <AlertTriangle className="mr-3 flex-shrink-0" size={20} />
-              <div>
-                <h4 className="font-medium">Operation Failed</h4>
-                <p className="text-sm mt-1">{errorDetails}</p>
-                <button onClick={() => setErrorDetails(null)} className="mt-2 text-sm font-semibold hover:underline">Dismiss</button>
-              </div>
+        <div className="scroll" style={{ padding: 20, maxHeight: 'calc(90vh - 148px)', display: 'grid', gap: 16 }}>
+          {errorDetails ? (
+            <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
+              {errorDetails}
             </div>
-          )}
+          ) : null}
 
-          {step === 'SELECT' && (
-             <div className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center relative hover:bg-gray-50 transition-colors">
-               <Upload className="mx-auto text-gray-400 mb-4" size={48} />
-               <p className="text-gray-700 font-medium mb-2">Click to upload or drag and drop</p>
-               <p className="text-gray-500 text-sm mb-6">CSV format only. Maximum 10MB.</p>
-               <input type="file" accept=".csv" onChange={handleFileSelect} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-               
-               {file && (
-                 <div className="bg-white border text-left p-4 rounded-lg shadow-sm flex items-center justify-between">
-                   <div className="font-medium">{file.name}</div>
-                   <div className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} KB</div>
-                 </div>
-               )}
-             </div>
-          )}
-
-          {step === 'LOCAL_VALIDATE' && (
-            <div className="text-center py-10">
-              {isProcessing ? (
-                <div className="flex flex-col items-center">
-                  <Loader2 className="animate-spin text-blue-600 mb-4" size={48} />
-                  <p className="text-gray-600">Parsing CSV rows locally...</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center">
-                  <CheckCircle className="text-green-500 mb-4" size={48} />
-                  <h3 className="text-xl font-bold mb-2">Parsed {parsedRows.length} Rows</h3>
-                  <p className="text-gray-600 mt-2">CSV syntax checks passed constraints.</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {step === 'API_PREVIEW' && (
-            <div className="py-2">
-              {isProcessing ? (
-                <div className="flex flex-col items-center py-10">
-                  <Loader2 className="animate-spin text-purple-600 mb-4" size={48} />
-                  <p className="text-gray-600">Running constraints dry-run on DB (Checking Live trips...)</p>
-                </div>
-              ) : previewResult ? (
-                <div>
-                  <h3 className="text-lg font-bold mb-4">Impact Preview</h3>
-                  <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-                      <p className="text-sm text-green-700 font-medium">Valid Rows</p>
-                      <p className="text-3xl font-bold text-green-700">{previewResult.validCount}</p>
-                    </div>
-                    <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-                      <p className="text-sm text-red-700 font-medium">Rows with Errors</p>
-                      <p className="text-3xl font-bold text-red-700">{previewResult.errorCount}</p>
-                    </div>
-                  </div>
-                  
-                  {previewResult.errors?.length > 0 && (
-                     <div className="bg-white border rounded-lg shadow-sm overflow-hidden mt-6">
-                       <div className="bg-red-50 px-4 py-2 border-b border-red-100 font-medium text-red-800 text-sm">Collisions Detected ({previewResult.errorCount})</div>
-                       <table className="min-w-full text-left text-sm whitespace-nowrap">
-                         <thead className="bg-gray-50 text-gray-500">
-                           <tr>
-                             <th className="px-6 py-3 font-medium">Row</th>
-                             <th className="px-6 py-3 font-medium">Phone</th>
-                             <th className="px-6 py-3 font-medium">Error Reason</th>
-                           </tr>
-                         </thead>
-                         <tbody className="divide-y divide-gray-200">
-                           {previewResult.errors.slice(0, 10).map((err) => (
-                             <tr key={err.rowNumber}>
-                               <td className="px-6 py-3 font-mono">{err.rowNumber}</td>
-                               <td className="px-6 py-3">{String(err.rowData.phone ?? '')}</td>
-                               <td className="px-6 py-3 text-red-600 truncate max-w-xs">{err.errorReason}</td>
-                             </tr>
-                           ))}
-                           {previewResult.errors.length > 10 && (
-                             <tr><td colSpan={3} className="px-6 py-3 text-center text-gray-500">... and {previewResult.errors.length - 10} more</td></tr>
-                           )}
-                         </tbody>
-                       </table>
-                     </div>
-                  )}
+          {step === 'SELECT' ? (
+            <label
+              style={{
+                display: 'grid',
+                placeItems: 'center',
+                gap: 10,
+                minHeight: 260,
+                borderRadius: 24,
+                border: '1px dashed var(--border-2)',
+                background: 'var(--surface-2)',
+                textAlign: 'center',
+                cursor: 'pointer',
+                padding: 24,
+              }}
+            >
+              <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Upload CSV</div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 500 }}>Click to upload or drag a CSV file</div>
+              <div style={{ color: 'var(--muted)' }}>Maximum 10MB. Expected columns should match the current import contract.</div>
+              {file ? (
+                <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                  {file.name} · {(file.size / 1024).toFixed(1)} KB
                 </div>
               ) : null}
-            </div>
-          )}
+              <input type="file" accept=".csv" onChange={handleFileSelect} style={{ display: 'none' }} />
+            </label>
+          ) : null}
 
-          {step === 'EXECUTING' && (
-             <div className="text-center py-10 flex flex-col items-center">
-               <Loader2 className="animate-spin text-blue-600 mb-4" size={48} />
-               <h3 className="text-xl font-bold mb-2">Executing Changes</h3>
-               <p className="text-gray-600 mt-2">Upserting users and queueing Firebase Provisioning background jobs.</p>
-             </div>
-          )}
-
-          {step === 'DONE' && execResult && (
-            <div className="text-center py-10 flex flex-col items-center">
-               <CheckCircle className="text-green-500 mb-4" size={48} />
-               <h3 className="text-2xl font-bold mb-2">Import Complete!</h3>
-               <p className="text-gray-600 mt-2">Successfully imported <span className="font-bold">{execResult.imported}</span> students.</p>
-               {execResult.failed > 0 && (
-                 <p className="text-red-500 mt-2">{execResult.failed} rows failed execution.</p>
-               )}
+          {step === 'LOCAL_VALIDATE' ? (
+            <div style={{ display: 'grid', gap: 10, placeItems: 'center', minHeight: 220 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 500 }}>{isProcessing ? 'Parsing CSV…' : `Parsed ${parsedRows.length} Rows`}</div>
+              <div style={{ color: 'var(--muted)' }}>{isProcessing ? 'Normalizing CSV rows against the expected DTO.' : 'Local CSV syntax checks completed.'}</div>
             </div>
-          )}
+          ) : null}
+
+          {step === 'API_PREVIEW' ? (
+            isProcessing ? (
+              <div style={{ display: 'grid', gap: 10, placeItems: 'center', minHeight: 220 }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 500 }}>Running DB Preview…</div>
+                <div style={{ color: 'var(--muted)' }}>Checking collisions and route assignment issues against live backend state.</div>
+              </div>
+            ) : previewResult ? (
+              <div style={{ display: 'grid', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div style={{ padding: 16, borderRadius: 18, background: 'var(--ok-soft)', border: '1px solid var(--ok)' }}>
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Valid Rows</div>
+                    <div style={{ marginTop: 8, fontFamily: 'var(--font-display)', fontSize: 34, fontWeight: 500 }}>{previewResult.validCount}</div>
+                  </div>
+                  <div style={{ padding: 16, borderRadius: 18, background: 'var(--err-soft)', border: '1px solid var(--err)' }}>
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Rows With Errors</div>
+                    <div style={{ marginTop: 8, fontFamily: 'var(--font-display)', fontSize: 34, fontWeight: 500 }}>{previewResult.errorCount}</div>
+                  </div>
+                </div>
+
+                {previewResult.errors?.length ? (
+                  <div className="scroll" style={{ border: '1px solid var(--border)', borderRadius: 16, maxHeight: 280 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)' }}>
+                        <tr>
+                          {['Row', 'Phone', 'Error Reason'].map((label) => (
+                            <th key={label} style={{ padding: '12px 14px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid var(--divider)' }}>
+                              {label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewResult.errors.slice(0, 12).map((err) => (
+                          <tr key={err.rowNumber}>
+                            <td className="mono" style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>{err.rowNumber}</td>
+                            <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)' }}>{String(err.rowData.phone ?? '')}</td>
+                            <td style={{ padding: '12px 14px', borderBottom: '1px solid var(--divider)', color: 'var(--err)' }}>{err.errorReason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            ) : null
+          ) : null}
+
+          {step === 'EXECUTING' ? (
+            <div style={{ display: 'grid', gap: 10, placeItems: 'center', minHeight: 220 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 500 }}>Executing Import…</div>
+              <div style={{ color: 'var(--muted)' }}>Upserting users and triggering downstream provisioning jobs.</div>
+            </div>
+          ) : null}
+
+          {step === 'DONE' && execResult ? (
+            <div style={{ display: 'grid', gap: 10, placeItems: 'center', minHeight: 220 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 500 }}>Import Complete</div>
+              <div style={{ color: 'var(--muted)' }}>Imported {execResult.imported} students.</div>
+              {execResult.failed > 0 ? <div style={{ color: 'var(--err)' }}>{execResult.failed} rows failed execution.</div> : null}
+            </div>
+          ) : null}
         </div>
 
-        {/* Footer Actions */}
-        <div className="bg-gray-50 px-6 py-4 border-t flex items-center justify-end space-x-3">
-          {step !== 'DONE' && step !== 'EXECUTING' && (
-            <button onClick={onClose} className="px-4 py-2 font-medium text-gray-700 rounded-lg hover:bg-gray-200">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '16px 20px', borderTop: '1px solid var(--divider)', background: 'var(--surface-2)' }}>
+          {step !== 'DONE' && step !== 'EXECUTING' ? (
+            <button type="button" onClick={onClose} style={{ borderRadius: 999, border: '1px solid var(--border)', background: 'var(--surface)', padding: '10px 16px' }}>
               Cancel
             </button>
-          )}
-
-          {step === 'SELECT' && file && (
-            <button onClick={processFile} className="px-4 py-2 font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center">
-              Parse File <ArrowRight size={16} className="ml-2" />
+          ) : null}
+          {step === 'SELECT' && file ? (
+            <button type="button" onClick={processFile} style={{ borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '10px 16px', fontWeight: 500 }}>
+              Parse File
             </button>
-          )}
-
-          {step === 'LOCAL_VALIDATE' && !isProcessing && parsedRows.length > 0 && (
-            <button onClick={runApiPreview} className="px-4 py-2 font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center">
-              Run DB Preview <ArrowRight size={16} className="ml-2" />
+          ) : null}
+          {step === 'LOCAL_VALIDATE' && !isProcessing && parsedRows.length > 0 ? (
+            <button type="button" onClick={runApiPreview} style={{ borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '10px 16px', fontWeight: 500 }}>
+              Run DB Preview
             </button>
-          )}
-
-          {step === 'API_PREVIEW' && !isProcessing && previewResult && (
-            <button onClick={executeImport} className="px-4 py-2 font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center">
-              {previewResult.errorCount > 0 ? 'Force Execute Valid Rows' : 'Execute Import'} <ArrowRight size={16} className="ml-2" />
+          ) : null}
+          {step === 'API_PREVIEW' && !isProcessing && previewResult ? (
+            <button type="button" onClick={executeImport} style={{ borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '10px 16px', fontWeight: 500 }}>
+              {previewResult.errorCount > 0 ? 'Force Execute Valid Rows' : 'Execute Import'}
             </button>
-          )}
-
-          {step === 'DONE' && (
-            <button onClick={onClose} className="px-4 py-2 font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              Close Wizard
+          ) : null}
+          {step === 'DONE' ? (
+            <button type="button" onClick={onClose} style={{ borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '10px 16px', fontWeight: 500 }}>
+              Close
             </button>
-          )}
+          ) : null}
         </div>
-
       </div>
     </div>
   );

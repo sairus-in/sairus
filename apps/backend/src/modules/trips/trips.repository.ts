@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma';
 import { logger } from '../../lib/logger';
-import { AppError, BadRequestError, ForbiddenError } from '../../lib/errors';
+import { AppError } from '../../lib/errors';
 import { getISODateIST } from 'shared';
 
 /**
@@ -117,75 +117,6 @@ export async function getTripStudents(tripId: string) {
 }
 
 /**
- * Manual mark attendance (driver marks student as present without QR)
- * Atomic transaction: upsert attendance + increment boardedCount + create event
- */
-export async function manualMarkAttendance(
-  tripId: string,
-  studentId: string,
-  driverId: string,
-  note?: string,
-) {
-  try {
-    const today = getISODateIST();
-    const trip = await prisma.trip.findUnique({ where: { id: tripId } });
-    
-    if (!trip) throw new BadRequestError('TRIP_NOT_FOUND');
-    if (trip.driverId !== driverId) throw new ForbiddenError('UNAUTHORIZED');
-    if (trip.status !== 'ACTIVE') throw new BadRequestError('TRIP_NOT_ACTIVE');
-
-    const [log] = await prisma.$transaction([
-      // Upsert attendance
-      prisma.attendanceLog.upsert({
-        where: { userId_tripId: { userId: studentId, tripId } },
-        update: {
-          status: 'MANUAL',
-          method: 'MANUAL_DRIVER',
-          checkedInAt: new Date(),
-          driverNote: note,
-        },
-        create: {
-          userId: studentId,
-          tripId,
-          busId: trip.busId,
-          routeId: trip.routeId,
-          date: today,
-          dateKey: today,
-          status: 'MANUAL',
-          method: 'MANUAL_DRIVER',
-          checkedInAt: new Date(),
-          driverNote: note,
-        },
-      }),
-      // Increment trip boarded count
-      prisma.trip.update({
-        where: { id: tripId },
-        data: { boardedCount: { increment: 1 } },
-      }),
-    ]);
-
-    // Create event log separately (needs attendance log ID)
-    await prisma.attendanceEvent.create({
-      data: {
-        attendanceId: log.id,
-        type: 'MANUAL_CORRECTION',
-        method: 'MANUAL_DRIVER',
-        actorId: driverId,
-        previousStatus: null,
-        newStatus: 'MANUAL',
-        metadata: { note },
-      },
-    });
-
-    return log;
-  } catch (e: any) {
-    if (e instanceof BadRequestError || e instanceof ForbiddenError) throw e;
-    logger.error({ source: 'SYSTEM', event: 'db_query_error', meta: { fn: 'manualMarkAttendance', tripId, studentId, error: e.message } });
-    throw new AppError('Failed to mark attendance', 500, 'DB_ERROR');
-  }
-}
-
-/**
  * Get all trips scheduled for today (used to find late-starting trips)
  */
 export async function getTodaysScheduledTrips() {
@@ -234,13 +165,112 @@ export async function getRouteStudents(routeId: string) {
   }
 }
 
+/**
+ * Get pending (unchecked) student userIds for a trip.
+ * Read-only FK join — acceptable here since trips owns the trip→logs relationship.
+ */
+export async function getPendingStudentLogs(tripId: string) {
+  try {
+    return await prisma.attendanceLog.findMany({
+      where: { tripId, status: 'PENDING' },
+      select: { userId: true },
+    });
+  } catch (e: any) {
+    logger.error({ source: 'SYSTEM', event: 'db_query_error', meta: { fn: 'getPendingStudentLogs', tripId, error: e.message } });
+    throw new AppError('Failed to fetch pending student logs', 500, 'DB_ERROR');
+  }
+}
+
+export async function getTripByIdForAdmin(tripId: string) {
+  return await prisma.trip.findUnique({
+    where: { id: tripId },
+    select: { id: true, routeId: true, busId: true },
+  });
+}
+
+export async function getScheduledTripsForLateCheck(routeIds: string[] | null, today: string) {
+  return await prisma.trip.findMany({
+    where: {
+      date: today,
+      status: 'SCHEDULED',
+      ...(routeIds ? { routeId: { in: routeIds } } : {}),
+    },
+    include: {
+      bus: { select: { number: true } },
+      route: {
+        select: {
+          name: true,
+          stops: { orderBy: { sequence: 'asc' }, take: 1, include: { stop: true } },
+        },
+      },
+      driver: { select: { name: true } },
+    },
+  });
+}
+
+export async function countActiveOfflineTrips(routeIds: string[]) {
+  return await prisma.trip.count({
+    where: { status: 'ACTIVE', gpsStatus: 'OFFLINE', routeId: { in: routeIds } },
+  });
+}
+
+export async function getTripsByIdsAndRoutes(tripIds: string[], routeIds: string[]) {
+  return await prisma.trip.findMany({
+    where: { id: { in: tripIds }, routeId: { in: routeIds } },
+    select: { id: true },
+  });
+}
+
+export async function getCompletedOutageTrips(routeIds: string[] | null) {
+  return await prisma.trip.findMany({
+    where: {
+      status: 'COMPLETED',
+      gpsOutageStart: { not: null },
+      ...(routeIds ? { routeId: { in: routeIds } } : {}),
+    },
+    include: { bus: { select: { number: true } }, route: { select: { id: true, name: true } } },
+    orderBy: { endedAt: 'desc' },
+    take: 25,
+  });
+}
+
+export async function getTripWithBusAndRoute(tripId: string) {
+  return await prisma.trip.findUnique({
+    where: { id: tripId },
+    include: { bus: { select: { number: true } }, route: { select: { id: true, name: true } } },
+  });
+}
+
+export async function getActiveBusIds() {
+  const activeTrips = await prisma.trip.findMany({
+    where: { status: 'ACTIVE' },
+    select: { busId: true },
+  });
+  return activeTrips.map(t => t.busId);
+}
+
+export async function getActiveTripByBus(busId: string) {
+  return await prisma.trip.findFirst({
+    where: { busId, status: 'ACTIVE' },
+    select: { id: true },
+  });
+}
+
 export const tripsRepository = {
   getTripById,
   startTrip,
   endTrip,
   getScheduledTripForDriver,
   getTripStudents,
-  manualMarkAttendance,
   getTodaysScheduledTrips,
   getRouteStudents,
+  getPendingStudentLogs,
+  getTripByIdForAdmin,
+  getScheduledTripsForLateCheck,
+  countActiveOfflineTrips,
+  getTripsByIdsAndRoutes,
+  getCompletedOutageTrips,
+  getTripWithBusAndRoute,
+  getActiveBusIds,
+  getActiveTripByBus,
 };

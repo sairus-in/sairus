@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
-import { AuthAuditEventType, MobileJWTPayload, Role } from 'shared';
+import { AuthAuditEventType, MobileJWTPayload, Role, ok } from 'shared';
 import { writeAuthAuditEvent, hashForLog } from '../../lib/auth-audit';
 import { writeAuthUserCache } from '../../lib/auth-cache';
 import { jwtConfig } from '../../lib/auth-config';
@@ -197,19 +197,16 @@ export const mobileLogin = async (
   const deviceIdHash = crypto.createHash('sha256').update(rawDeviceId).digest('hex');
 
   if (user.authStatus === 'PENDING_PROVISIONING') {
-    return {
-      success: true,
-      data: {
-        status: 'PENDING_PROVISIONING',
-        token: issueMobileJwt(user, deviceIdHash),
-        user: {
-          id: user.id,
-          name: user.name,
-          phone: user.phone,
-          role: user.role,
-        },
+    return ok({
+      status: 'PENDING_PROVISIONING',
+      token: issueMobileJwt(user, deviceIdHash),
+      user: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        role: user.role,
       },
-    };
+    });
   }
 
   if (!user.firebaseUid) {
@@ -264,13 +261,10 @@ export const mobileLogin = async (
     });
   }
 
-  return {
-    success: true,
-    data: {
-      token,
-      user: toMobileAuthUser(user),
-    },
-  };
+  return ok({
+    token,
+    user: toMobileAuthUser(user),
+  });
 };
 
 export const mobileRefresh = async (firebaseToken: string, rawDeviceId: string) => {
@@ -315,10 +309,7 @@ export const mobileRefresh = async (firebaseToken: string, rawDeviceId: string) 
     deviceId: deviceIdHash,
   });
 
-  return {
-    success: true,
-    data: { token },
-  };
+  return ok({ token });
 };
 
 export const mobileLogout = async (userId: string, deviceId: string) => {

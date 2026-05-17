@@ -218,6 +218,14 @@ export class IncidentsService {
     const idx = chain.indexOf(current);
     return idx >= 0 && idx < chain.length - 1 ? chain[idx + 1] : null;
   }
+  async getIncidentByIdForAdmin(incidentId: string) { return incidentsRepository.getIncidentByIdForAdmin(incidentId); }
+  async getActiveIncidentsForCommandCenter(routeIds: string[] | null) { return incidentsRepository.getActiveIncidentsForCommandCenter(routeIds); }
+  async getIncidentContextForAdmin(incidentId: string) { return incidentsRepository.getIncidentContextForAdmin(incidentId); }
+  async getIncidentsForAdmin(status?: string, routeIds?: string[] | null, pagination?: { page: number; limit: number }) { return incidentsRepository.getIncidentsForAdmin(status, routeIds, pagination); }
+  async getIncidentWithBusAndRoute(incidentId: string) { return incidentsRepository.getIncidentWithBusAndRoute(incidentId); }
+  async updateIncidentEscalationForAdmin(incidentId: string, nextLevel: any, assignedAt: Date) { return incidentsRepository.updateIncidentEscalationForAdmin(incidentId, nextLevel, assignedAt); }
+  async assignSubstituteForAdmin(incidentId: string, alternateBusId: string, assignedAt: Date) { return incidentsRepository.assignSubstituteForAdmin(incidentId, alternateBusId, assignedAt); }
+  async resolveIncidentForAdmin(incidentId: string, resolverId: string, resolutionNotes: string) { return incidentsRepository.resolveIncidentForAdmin(incidentId, resolverId, resolutionNotes); }
 }
 
 export const incidentsService = new IncidentsService();

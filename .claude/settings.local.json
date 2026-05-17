@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m graphify query \"code review architecture\" --graph \"C:/Users/krist/Desktop/college-bus-system/graphify-out/graph.json\" --budget 500)",
+      "Bash(pnpm --filter backend type-check)",
+      "Bash(mv \"/c/Users/krist/Desktop/college-bus-system/docs/api-layer\" \"/c/Users/krist/Desktop/completed-phases-docs/api-layer\")",
+      "Bash(rm \"/c/Users/krist/Desktop/college-bus-system/docs/archive/admin panel f,end and api audit.md\")",
+      "Bash(rm \"/c/Users/krist/Desktop/college-bus-system/docs/admin panel f,end and api audit.md\")",
+      "Bash(pnpm type-check *)",
+      "Bash(npx skills *)",
+      "Bash(node *)",
+      "Bash(python -m graphify query \"socket.io rooms GPS outage delegate heartbeat\" --graph graphify-out/graph.json --budget 2000)",
+      "PowerShell(Get-Item *)",
+      "Bash(pnpm --filter mobile type-check)",
+      "Bash(pnpm --filter shared test)",
+      "Bash(pnpm --filter shared test --run)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "code-review-graph"
+  ]
+}

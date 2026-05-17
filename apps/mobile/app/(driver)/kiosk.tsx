@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Animated,
   AppState,
   StyleSheet,
   Text,
@@ -15,6 +14,19 @@ import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import QRCode from 'react-native-qrcode-svg';
+import Animated, {
+  FadeIn,
+  FadeInUp,
+  FadeOutDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withSpring,
+  interpolate,
+  Extrapolation,
+} from 'react-native-reanimated';
 import { ScreenErrorBoundary } from '../../components/shared/ScreenErrorBoundary';
 import { colors, radii, spacing, typography } from '../../constants/theme';
 import { useKioskSocket } from '../../hooks/useKioskSocket';
@@ -53,7 +65,26 @@ function KioskContent() {
   const socketDeadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [countdown, setCountdown] = useState(0);
   const qrExpiredFired = useRef(false);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
+
+  // Animation values
+  const buttonScale = useSharedValue(1);
+  const countdownPulse = useSharedValue(1);
+
+  // Countdown pulse animation
+  useEffect(() => {
+    if (countdown <= 10 && countdown > 0) {
+      countdownPulse.value = withRepeat(
+        withSequence(
+          withTiming(1.1, { duration: 300 }),
+          withTiming(1, { duration: 300 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      countdownPulse.value = 1;
+    }
+  }, [countdown]);
 
   useEffect(() => {
     activateKeepAwakeAsync('kiosk');
@@ -146,18 +177,18 @@ function KioskContent() {
     return () => clearInterval(interval);
   }, [qrExpiresAt]);
 
-  useEffect(() => {
-    if (!lastToast) {
-      return;
-    }
+  // Animated styles
+  const countdownAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: countdownPulse.value }],
+  }));
 
-    toastOpacity.setValue(1);
-    const timer = setTimeout(() => {
-      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start();
-    }, 4000);
+  const handleButtonPressIn = () => {
+    buttonScale.value = withSpring(0.95, { damping: 15, stiffness: 400 });
+  };
 
-    return () => clearTimeout(timer);
-  }, [lastToast, toastOpacity]);
+  const handleButtonPressOut = () => {
+    buttonScale.value = withSpring(1, { damping: 15, stiffness: 400 });
+  };
 
   const gpsDotColor =
     gpsStatus === 'LIVE'
@@ -257,7 +288,11 @@ function KioskContent() {
       ) : null}
 
       {lastToast ? (
-        <Animated.View style={[styles.toast, { opacity: toastOpacity }]}>
+        <Animated.View
+          entering={FadeInUp.duration(300)}
+          exiting={FadeOutDown.duration(300)}
+          style={styles.toast}
+        >
           <Text
             style={[
               styles.toastIcon,
@@ -275,20 +310,41 @@ function KioskContent() {
         </Animated.View>
       ) : null}
 
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.bottomBtn} onPress={() => {}}>
-          <Text style={styles.bottomBtnText}>{t('kiosk.nextStopBtn')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bottomBtn} onPress={() => {}}>
-          <Text style={styles.bottomBtnText}>{t('kiosk.manual')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.bottomBtn, styles.endBtn]}
-          onPress={() => router.push({ pathname: '/(driver)/summary', params: { tripId } })}
-        >
-          <Text style={styles.endBtnText}>End trip</Text>
-        </TouchableOpacity>
-      </View>
+      <Animated.View style={styles.bottomBar}>
+        <Animated.View style={{ transform: [{ scale: buttonScale.value }], flex: 1 }}>
+          <TouchableOpacity
+            style={styles.bottomBtn}
+            onPress={() => {}}
+            onPressIn={handleButtonPressIn}
+            onPressOut={handleButtonPressOut}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.bottomBtnText}>{t('kiosk.nextStopBtn')}</Text>
+          </TouchableOpacity>
+        </Animated.View>
+        <Animated.View style={{ transform: [{ scale: buttonScale.value }], flex: 1 }}>
+          <TouchableOpacity
+            style={styles.bottomBtn}
+            onPress={() => {}}
+            onPressIn={handleButtonPressIn}
+            onPressOut={handleButtonPressOut}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.bottomBtnText}>{t('kiosk.manual')}</Text>
+          </TouchableOpacity>
+        </Animated.View>
+        <Animated.View style={{ transform: [{ scale: buttonScale.value }], flex: 1 }}>
+          <TouchableOpacity
+            style={[styles.bottomBtn, styles.endBtn]}
+            onPress={() => router.push({ pathname: '/(driver)/summary', params: { tripId } })}
+            onPressIn={handleButtonPressIn}
+            onPressOut={handleButtonPressOut}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.endBtnText}>End trip</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </Animated.View>
     </SafeAreaView>
   );
 }
@@ -396,12 +452,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radii.sm,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.info.text,
     marginBottom: spacing.xs,
   },
   urgentBanner: {
-    borderLeftColor: colors.error.text,
+    backgroundColor: 'rgba(220, 38, 38, 0.18)',
   },
   messageText: {
     fontFamily: typography.family,

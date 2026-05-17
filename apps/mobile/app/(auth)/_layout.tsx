@@ -7,6 +7,8 @@ export default function AuthLayout() {
       <Stack.Screen name="login" />
       <Stack.Screen name="verify-otp" />
       <Stack.Screen name="pending" />
+      {/* DEV ONLY — remove for production */}
+      <Stack.Screen name="dev-bypass" options={{ animation: 'none' }} />
     </Stack>
   );
 }

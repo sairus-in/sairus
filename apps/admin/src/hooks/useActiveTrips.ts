@@ -8,6 +8,9 @@ export type LiveTripState = AdminLiveTripState;
 export const useActiveTrips = () => {
   return useQuery({
     queryKey: QK.activeTrips(),
-    queryFn: (): Promise<LiveTripState[]> => api.get<LiveTripState[]>('/v1/admin/live/trips/active'),
+    queryFn: async (): Promise<LiveTripState[]> => {
+      const response = await api.getList<LiveTripState>('/v1/admin/live/trips/active');
+      return response.data;
+    },
   });
 };

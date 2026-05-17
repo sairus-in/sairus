@@ -71,6 +71,21 @@ export const StudentHomeFeaturesSchema = z.object({
   canRequestCorrection: z.boolean(),
 });
 
+export const RouteGeometryStopSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  lat: z.number(),
+  lon: z.number(),
+  sequence: z.number(),
+  passed: z.boolean(),
+  isMyStop: z.boolean(),
+});
+
+export const RouteGeometrySchema = z.object({
+  stops: z.array(RouteGeometryStopSchema),
+  polyline: z.array(z.tuple([z.number(), z.number()])),
+});
+
 export const StudentScreenStateSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('no_trip') }),
   z.object({
@@ -85,6 +100,7 @@ export const StudentScreenStateSchema = z.discriminatedUnion('status', [
     busId: z.string(),
     canCheckIn: z.boolean(),
     busEta: z.number().nullable(),
+    distanceRemainingM: z.number().nullable(),
   }),
   z.object({
     status: z.literal('checked_in'),
@@ -114,6 +130,7 @@ export const StudentHomeResponseSchema = z.object({
     attendance: StudentHomeAttendanceSchema,
     history: StudentHomeHistorySchema,
     alerts: StudentHomeAlertsSchema,
+    routeGeometry: RouteGeometrySchema.nullable(),
   }),
   features: StudentHomeFeaturesSchema,
 });
@@ -169,6 +186,7 @@ export const DriverTodayResponseSchema = z.object({
   }).nullable(),
   route: z.object({
     name: z.string(),
+    area: z.string().optional(),
   }).nullable(),
   expectedStudents: z.number(),
 });

@@ -3,6 +3,7 @@ import { invalidateAdminAuthCache, invalidateMobileAuthCache } from './auth-cach
 import { logger } from './logger';
 import { prisma } from './prisma';
 import { redis } from './redis';
+import { actorCache } from '../spine/auth';
 
 async function bestEffortRedisDelete(key: string): Promise<void> {
   try {
@@ -29,6 +30,7 @@ export const revokeMobileAuthState = async (
   });
 
   await invalidateMobileAuthCache(userId);
+  await actorCache.invalidate('mobile', userId);
   await bestEffortRedisDelete(`jwt:blacklist:${userId}`);
 
   return user;
@@ -47,6 +49,7 @@ export const revokeAdminAuthState = async (
   });
 
   await invalidateAdminAuthCache(adminId);
+  await actorCache.invalidate('admin', adminId);
 
   return admin;
 };

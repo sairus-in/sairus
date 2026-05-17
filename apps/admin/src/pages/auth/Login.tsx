@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { AlertCircle, CheckCircle } from 'lucide-react';
 import {
   AdminLoginMfaChallengeResponse,
   AdminLoginSuccessResponse,
@@ -32,17 +33,9 @@ export const Login: React.FC = () => {
   }
 
   const finishLogin = async () => {
-    try {
-      console.log('[Login] Fetching admin session after auth...');
-      const admin = await api.get<AdminSessionUser>('/v1/admin/auth/me');
-      console.log('[Login] Session retrieved successfully:', admin);
-      login(admin);
-      console.log('[Login] User logged in, navigating to dashboard');
-      navigate('/ops/dashboard', { replace: true });
-    } catch (err) {
-      console.error('[Login] Failed to fetch session after login:', err);
-      throw err;
-    }
+    const admin = await api.get<AdminSessionUser>('/v1/admin/auth/me');
+    login(admin);
+    navigate('/ops/dashboard', { replace: true });
   };
 
   const handleCredentialSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -51,16 +44,12 @@ export const Login: React.FC = () => {
     setError(null);
 
     try {
-      console.log('[Login] Submitting credentials for:', email);
       const payload = await api.post<AdminLoginSuccessResponse | AdminLoginMfaChallengeResponse>('/v1/admin/auth/login', {
         email: email.trim(),
         password,
       });
 
-      console.log('[Login] Login response received:', payload);
-      
       if (payload && 'mfaRequired' in payload && payload.mfaRequired) {
-        console.log('[Login] MFA required');
         setChallengeToken((payload as { challengeToken: string }).challengeToken);
         setPassword('');
         return;
@@ -70,10 +59,8 @@ export const Login: React.FC = () => {
         throw new Error('Login response was missing the expected admin session payload.');
       }
 
-      console.log('[Login] Finishing login process...');
       await finishLogin();
     } catch (err) {
-      console.error('[Login] Login failed:', err);
       setError(extractApiError(err).message);
     } finally {
       setSubmitting(false);
@@ -83,7 +70,6 @@ export const Login: React.FC = () => {
   const handleMfaSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!challengeToken) {
-      console.warn('[Login] MFA submit without challenge token');
       return;
     }
 
@@ -91,7 +77,6 @@ export const Login: React.FC = () => {
     setError(null);
 
     try {
-      console.log('[Login] Verifying MFA code...');
       await api.post('/v1/admin/auth/verify-mfa', {
         challengeToken,
         ...(mfaMode === 'totp'
@@ -99,10 +84,8 @@ export const Login: React.FC = () => {
           : { backupCode: backupCode.trim() }),
       });
 
-      console.log('[Login] MFA verified, finishing login...');
       await finishLogin();
     } catch (err) {
-      console.error('[Login] MFA verification failed:', err);
       setError(extractApiError(err).message);
     } finally {
       setSubmitting(false);
@@ -117,34 +100,15 @@ export const Login: React.FC = () => {
         ? 'Your admin session expired. Sign in again to continue.'
         : logoutReason === 'account-suspended'
           ? 'This administrator account is suspended. Contact another administrator if you need access restored.'
-        : null;
+          : null;
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'grid',
-      placeItems: 'center',
-      padding: '2rem',
-      background: 'linear-gradient(160deg, #E0F2FE 0%, #F8FAFC 45%, #DCFCE7 100%)',
-    }}>
-      <div style={{
-        width: '100%',
-        maxWidth: 420,
-        background: 'rgba(255,255,255,0.92)',
-        border: '1px solid rgba(148,163,184,0.25)',
-        borderRadius: 24,
-        boxShadow: '0 24px 80px rgba(15,23,42,0.12)',
-        padding: '2rem',
-        backdropFilter: 'blur(12px)',
-      }}>
-        <div style={{ marginBottom: '1.5rem' }}>
-          <p style={{ margin: 0, color: '#0F766E', fontSize: '0.85rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            College Bus Admin
-          </p>
-          <h1 style={{ margin: '0.5rem 0 0', fontSize: '2rem', color: '#0F172A' }}>
-            {isMfaStep ? 'Verify MFA' : 'Sign in'}
-          </h1>
-          <p style={{ margin: '0.75rem 0 0', color: '#475569', lineHeight: 1.5 }}>
+    <div className="login-container">
+      <div className="login-card">
+        <div className="login-header">
+          <p className="login-badge">College Bus Admin</p>
+          <h1>{isMfaStep ? 'Verify MFA' : 'Sign in'}</h1>
+          <p className="login-subtitle">
             {isMfaStep
               ? 'Enter the 6-digit code from your authenticator app to finish signing in.'
               : 'Use your admin credentials to access live operations and transport data.'}
@@ -152,196 +116,128 @@ export const Login: React.FC = () => {
         </div>
 
         {reasonMessage && !isMfaStep && (
-          <div style={{
-            borderRadius: 14,
-            background: '#ECFDF5',
-            color: '#065F46',
-            padding: '0.85rem 1rem',
-            fontSize: '0.92rem',
-            marginBottom: '1rem',
-          }}>
-            {reasonMessage}
+          <div className="login-message login-message--success" role="status">
+            <CheckCircle size={16} aria-hidden="true" />
+            <span>{reasonMessage}</span>
           </div>
         )}
 
         {!isMfaStep ? (
-          <form onSubmit={handleCredentialSubmit} style={{ display: 'grid', gap: '1rem' }}>
-            <label style={{ display: 'grid', gap: '0.4rem', color: '#0F172A', fontWeight: 600 }}>
-              Email
+          <form onSubmit={handleCredentialSubmit} className="login-form">
+            <div className="form-field">
+              <label htmlFor="email">Email</label>
               <input
+                id="email"
                 type="email"
                 autoComplete="username"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 required
-                style={{
-                  width: '100%',
-                  borderRadius: 14,
-                  border: '1px solid #CBD5E1',
-                  padding: '0.9rem 1rem',
-                  fontSize: '0.95rem',
-                  background: '#FFFFFF',
-                }}
+                aria-describedby="email-hint"
               />
-            </label>
+              <span id="email-hint" className="visually-hidden">Enter your registered email address</span>
+            </div>
 
-            <label style={{ display: 'grid', gap: '0.4rem', color: '#0F172A', fontWeight: 600 }}>
-              Password
+            <div className="form-field">
+              <label htmlFor="password">Password</label>
               <input
+                id="password"
                 type="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
-                style={{
-                  width: '100%',
-                  borderRadius: 14,
-                  border: '1px solid #CBD5E1',
-                  padding: '0.9rem 1rem',
-                  fontSize: '0.95rem',
-                  background: '#FFFFFF',
-                }}
+                aria-describedby="password-hint"
               />
-            </label>
+              <span id="password-hint" className="visually-hidden">Enter your password</span>
+            </div>
 
             {error && (
-              <div style={{
-                borderRadius: 14,
-                background: '#FEF2F2',
-                color: '#B91C1C',
-                padding: '0.85rem 1rem',
-                fontSize: '0.92rem',
-              }}>
-                {error}
+              <div className="login-message login-message--error" role="alert" aria-live="polite">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>{error}</span>
               </div>
             )}
 
             <button
               type="submit"
               disabled={submitting}
-              style={{
-                border: 0,
-                borderRadius: 16,
-                background: submitting ? '#94A3B8' : '#0F766E',
-                color: '#FFFFFF',
-                padding: '0.95rem 1rem',
-                fontSize: '0.98rem',
-                fontWeight: 700,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-              }}
+              className="btn btn--primary"
             >
               {submitting ? 'Signing in...' : 'Sign in'}
             </button>
 
-            <Link
-              to="/forgot-password"
-              style={{ color: '#0F766E', fontWeight: 700, fontSize: '0.92rem', textAlign: 'center', textDecoration: 'none' }}
-            >
+            <Link to="/forgot-password" className="login-forgot">
               Forgot password?
             </Link>
           </form>
         ) : (
-          <form onSubmit={handleMfaSubmit} style={{ display: 'grid', gap: '1rem' }}>
-            <div style={{ display: 'inline-flex', borderRadius: 14, background: '#E2E8F0', padding: '0.25rem', gap: '0.25rem' }}>
+          <form onSubmit={handleMfaSubmit} className="login-form">
+            <div className="mfa-toggle" role="tablist" aria-label="MFA verification method">
               <button
                 type="button"
+                role="tab"
+                aria-selected={mfaMode === 'totp'}
+                aria-controls="mfa-totp-panel"
                 onClick={() => setMfaMode('totp')}
-                style={{
-                  border: 0,
-                  borderRadius: 10,
-                  background: mfaMode === 'totp' ? '#FFFFFF' : 'transparent',
-                  color: '#0F172A',
-                  padding: '0.65rem 0.9rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
+                className={mfaMode === 'totp' ? 'active' : ''}
               >
                 Authenticator code
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={mfaMode === 'backup'}
+                aria-controls="mfa-backup-panel"
                 onClick={() => setMfaMode('backup')}
-                style={{
-                  border: 0,
-                  borderRadius: 10,
-                  background: mfaMode === 'backup' ? '#FFFFFF' : 'transparent',
-                  color: '#0F172A',
-                  padding: '0.65rem 0.9rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
+                className={mfaMode === 'backup' ? 'active' : ''}
               >
                 Backup code
               </button>
             </div>
 
             {mfaMode === 'totp' ? (
-              <label style={{ display: 'grid', gap: '0.4rem', color: '#0F172A', fontWeight: 600 }}>
-                Authenticator code
+              <div className="form-field" role="tabpanel" id="mfa-totp-panel">
+                <label htmlFor="mfa-code">Authenticator code</label>
                 <input
+                  id="mfa-code"
                   value={mfaCode}
                   onChange={(event) => setMfaCode(event.target.value)}
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   placeholder="123456"
                   required
-                  style={{
-                    width: '100%',
-                    borderRadius: 14,
-                    border: '1px solid #CBD5E1',
-                    padding: '0.9rem 1rem',
-                    fontSize: '0.95rem',
-                    background: '#FFFFFF',
-                  }}
+                  aria-describedby="mfa-code-hint"
                 />
-              </label>
+                <span id="mfa-code-hint" className="visually-hidden">Enter the 6-digit code from your authenticator app</span>
+              </div>
             ) : (
-              <label style={{ display: 'grid', gap: '0.4rem', color: '#0F172A', fontWeight: 600 }}>
-                Backup code
+              <div className="form-field" role="tabpanel" id="mfa-backup-panel">
+                <label htmlFor="backup-code">Backup code</label>
                 <input
+                  id="backup-code"
                   value={backupCode}
                   onChange={(event) => setBackupCode(event.target.value.toUpperCase())}
                   autoComplete="one-time-code"
                   placeholder="ABCD1234"
                   required
-                  style={{
-                    width: '100%',
-                    borderRadius: 14,
-                    border: '1px solid #CBD5E1',
-                    padding: '0.9rem 1rem',
-                    fontSize: '0.95rem',
-                    background: '#FFFFFF',
-                    textTransform: 'uppercase',
-                  }}
+                  aria-describedby="backup-code-hint"
                 />
-              </label>
+                <span id="backup-code-hint" className="visually-hidden">Enter your backup code</span>
+              </div>
             )}
 
             {error && (
-              <div style={{
-                borderRadius: 14,
-                background: '#FEF2F2',
-                color: '#B91C1C',
-                padding: '0.85rem 1rem',
-                fontSize: '0.92rem',
-              }}>
-                {error}
+              <div className="login-message login-message--error" role="alert" aria-live="polite">
+                <AlertCircle size={16} aria-hidden="true" />
+                <span>{error}</span>
               </div>
             )}
 
             <button
               type="submit"
               disabled={submitting}
-              style={{
-                border: 0,
-                borderRadius: 16,
-                background: submitting ? '#94A3B8' : '#0F766E',
-                color: '#FFFFFF',
-                padding: '0.95rem 1rem',
-                fontSize: '0.98rem',
-                fontWeight: 700,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-              }}
+              className="btn btn--primary"
             >
               {submitting ? 'Verifying...' : 'Verify and continue'}
             </button>
@@ -355,16 +251,7 @@ export const Login: React.FC = () => {
                 setMfaMode('totp');
               }}
               disabled={submitting}
-              style={{
-                borderRadius: 16,
-                border: '1px solid #CBD5E1',
-                background: '#FFFFFF',
-                color: '#0F172A',
-                padding: '0.95rem 1rem',
-                fontSize: '0.95rem',
-                fontWeight: 600,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-              }}
+              className="btn btn--secondary"
             >
               Back
             </button>

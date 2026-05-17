@@ -1,8 +1,9 @@
 import { redis } from '../../lib/redis';
 import { auditService, AuditActorContext } from '../../lib/audit.service';
 import { cacheDel, cacheGet, cacheHIncrBy, cacheSet } from '../../lib/cache';
-import { prisma } from '../../lib/prisma';
+import * as adminRepository from './admin.repository';
 import { NotFoundError, BadRequestError } from '../../lib/errors';
+import { logger } from '../../lib/logger';
 import { ResolvedAdminAccessContext, assertAdminAction } from '../../lib/admin-access';
 import {
   AdminAction,
@@ -22,6 +23,22 @@ import {
 } from 'shared';
 import { io } from '../../websocket/socket';
 import { notificationsService } from '../notifications/notifications.service';
+import { attendanceService } from '../attendance/attendance.service';
+import { incidentsService } from '../incidents/incidents.service';
+import { tripsService } from '../trips/trips.service';
+import { importService } from '../import/import.service';
+import * as adminAuthService from '../auth/admin-auth.service';
+import {
+  findMessages,
+  createMessage,
+  findActiveRouteAssignments,
+  findActiveRouteCoordinators,
+  findCoordinatorsForRoute,
+  findActiveUsersByRole,
+  findSubstituteBuses,
+  findBusById
+} from './admin.repository';
+import { MessageType } from '@prisma/client';
 
 type MessageQuery = {
   busId?: string;
@@ -46,6 +63,27 @@ const PRIORITY_ORDER: Record<AdminPriorityLevel, number> = {
   MEDIUM: 2,
   LOW: 3,
 };
+
+const safeInt = (value: string | null | undefined, fallback = 0) => {
+  if (value == null || value === '') {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) {
+    logger.warn({
+      event: 'redis_state_non_numeric_value',
+      source: 'SYSTEM',
+      meta: { value },
+    });
+    return fallback;
+  }
+
+  return parsed;
+};
+
+const isMessageType = (value: string): value is MessageType =>
+  Object.values(MessageType).includes(value as MessageType);
 
 const minutesSince = (value?: Date | string | null) => {
   if (!value) {
@@ -82,6 +120,72 @@ const normalizeAlert = (rawAlert: string): AdminLiveAlert => {
 };
 
 export class AdminService {
+
+  // ==========================================
+  // PHASE 0C WRAPPER DELEGATIONS
+  // Delegating to domain services instead of re-implementing
+  // ==========================================
+
+  async coordinatorMarkAllPresent(tripId: string, coordinatorId: string, auditActor?: AuditActorContext) {
+    return attendanceService.coordinatorMarkAllPresent(tripId, coordinatorId, auditActor);
+  }
+
+  async getImportSessionDetail(sessionId: string) {
+    return importService.getImportSessionDetail(sessionId);
+  }
+
+  async retryImport(sessionId: string, adminId: string) {
+    return importService.retryFailedRows(sessionId, adminId);
+  }
+
+  async listAdminUsersForManagement() {
+    return adminAuthService.listAdminUsersForManagement();
+  }
+
+  async createAdminInvite(data: {
+    email: string;
+    name: string;
+    role: 'COORDINATOR' | 'TRANSPORT_OFFICER' | 'FACULTY' | 'MANAGEMENT';
+    passwordHash: string;
+    inviteTokenHash: string;
+    inviteTokenExpiresAt: Date;
+    createdById: string;
+    routeIds: string[];
+    department?: string | null;
+  }) {
+    return adminAuthService.createAdminInvite(data);
+  }
+
+  async updateAdminProfileAndScopes(data: {
+    adminId: string;
+    name?: string;
+    role?: 'COORDINATOR' | 'TRANSPORT_OFFICER' | 'FACULTY' | 'MANAGEMENT';
+    routeIds?: string[];
+    department?: string | null;
+  }) {
+    return adminAuthService.updateAdminProfileAndScopes(data);
+  }
+
+  async suspendAdminUser(data: { adminId: string; suspendedBy: string; reason: string }) {
+    return adminAuthService.suspendAdminUser(data);
+  }
+
+  async unsuspendAdminUser(data: { adminId: string; unsuspendedBy: string; reason?: string | null }) {
+    return adminAuthService.unsuspendAdminUser(data);
+  }
+
+  async findAdminByEmail(email: string) {
+    return adminAuthService.findAdminByEmail(email);
+  }
+
+  async hashPassword(password: string) {
+    return adminAuthService.hashAdminPassword(password);
+  }
+
+  // ==========================================
+  // END PHASE 0C WRAPPER DELEGATIONS
+  // ==========================================
+
   private isCoordinatorAccess(access?: ResolvedAdminAccessContext): access is ResolvedAdminAccessContext {
     return access?.role === 'COORDINATOR';
   }
@@ -121,14 +225,7 @@ export class AdminService {
     access: ResolvedAdminAccessContext | undefined,
     action: AdminAction,
   ) {
-    const trip = await prisma.trip.findUnique({
-      where: { id: tripId },
-      select: {
-        id: true,
-        routeId: true,
-        busId: true,
-      },
-    });
+    const trip = await tripsService.getTripByIdForAdmin(tripId);
 
     if (!trip) {
       throw new NotFoundError('TRIP_NOT_FOUND');
@@ -143,25 +240,14 @@ export class AdminService {
     access: ResolvedAdminAccessContext | undefined,
     action: AdminAction,
   ) {
-    const incident = await prisma.incident.findUnique({
-      where: { id: incidentId },
-      select: {
-        id: true,
-        tripId: true,
-        routeId: true,
-        busId: true,
-      },
-    });
+    const incident = await incidentsService.getIncidentByIdForAdmin(incidentId);
 
     if (!incident) {
       throw new NotFoundError('INCIDENT_NOT_FOUND');
     }
 
     const routeId = incident.routeId ?? (
-      await prisma.trip.findUnique({
-        where: { id: incident.tripId },
-        select: { routeId: true },
-      })
+      await tripsService.getTripByIdForAdmin(incident.tripId)
     )?.routeId;
 
     this.assertRouteAction(access, action, routeId);
@@ -177,19 +263,7 @@ export class AdminService {
     access: ResolvedAdminAccessContext | undefined,
     action: AdminAction,
   ) {
-    const correction = await prisma.attendanceCorrection.findUnique({
-      where: { id: correctionId },
-      include: {
-        attendance: {
-          select: {
-            id: true,
-            tripId: true,
-            routeId: true,
-            status: true,
-          },
-        },
-      },
-    });
+    const correction = await attendanceService.getScopedCorrectionOrThrow(correctionId);
 
     if (!correction) {
       throw new NotFoundError('CORRECTION_NOT_FOUND');
@@ -204,18 +278,7 @@ export class AdminService {
       return new Map<string, number>();
     }
 
-    const rows = await prisma.attendanceLog.groupBy({
-      by: ['tripId'],
-      where: {
-        tripId: { in: tripIds },
-        status: 'PENDING',
-      },
-      _count: {
-        tripId: true,
-      },
-    });
-
-    return new Map(rows.map((row) => [row.tripId, row._count.tripId]));
+    return attendanceService.getPendingStudentCountMap(tripIds);
   }
 
   private async getPendingOutageCorrectionCountMap(tripIds: string[]) {
@@ -223,30 +286,7 @@ export class AdminService {
       return new Map<string, number>();
     }
 
-    const rows = await prisma.attendanceCorrection.findMany({
-      where: {
-        status: 'PENDING',
-        metadata: { path: ['busGPSOffline'], equals: true },
-        attendance: {
-          tripId: { in: tripIds },
-        },
-      },
-      select: {
-        attendance: {
-          select: {
-            tripId: true,
-          },
-        },
-      },
-    });
-
-    const counts = new Map<string, number>();
-    for (const row of rows) {
-      const tripId = row.attendance.tripId;
-      counts.set(tripId, (counts.get(tripId) ?? 0) + 1);
-    }
-
-    return counts;
+    return attendanceService.getPendingOutageCorrectionCountMap(tripIds);
   }
 
   private buildContext(context: AdminActionContext): AdminActionContext {
@@ -525,10 +565,7 @@ export class AdminService {
     }
 
     if (context.contextType === 'TRIP' || context.contextType === 'GPS_OUTAGE') {
-      const trip = await prisma.trip.findUnique({
-        where: { id: context.tripId ?? context.contextId },
-        select: { id: true, busId: true, routeId: true },
-      });
+      const trip = await tripsService.getTripByIdForAdmin(context.tripId ?? context.contextId);
       if (!trip) {
         throw new NotFoundError('TRIP_NOT_FOUND');
       }
@@ -545,20 +582,7 @@ export class AdminService {
     }
 
     if (context.contextType === 'INCIDENT') {
-      const incident = await prisma.incident.findUnique({
-        where: { id: context.incidentId ?? context.contextId },
-        select: {
-          id: true,
-          busId: true,
-          routeId: true,
-          tripId: true,
-          trip: {
-            select: {
-              routeId: true,
-            },
-          },
-        },
-      });
+      const incident = await incidentsService.getIncidentContextForAdmin(context.incidentId ?? context.contextId);
       if (!incident) {
         throw new NotFoundError('INCIDENT_NOT_FOUND');
       }
@@ -599,27 +623,7 @@ export class AdminService {
     }
 
     const today = getTodayDateKey();
-    const scheduledTrips = await prisma.trip.findMany({
-      where: {
-        date: today,
-        status: 'SCHEDULED',
-        ...(routeIds ? { routeId: { in: routeIds } } : {}),
-      },
-      include: {
-        bus: { select: { number: true } },
-        route: {
-          select: {
-            name: true,
-            stops: {
-              orderBy: { sequence: 'asc' },
-              take: 1,
-              include: { stop: true },
-            },
-          },
-        },
-        driver: { select: { name: true } },
-      },
-    });
+    const scheduledTrips = await tripsService.getScheduledTripsForLateCheck(routeIds ?? null, today);
 
     const now = new Date();
     const parts = new Intl.DateTimeFormat('en-GB', {
@@ -671,28 +675,15 @@ export class AdminService {
         };
       }
 
-      const [activeTrips, gpsOffline, openCorrections] = await Promise.all([
+      const [activeTripsResult, gpsOffline, openCorrections] = await Promise.all([
         this.getActiveTrips(access),
-        prisma.trip.count({
-          where: {
-            status: 'ACTIVE',
-            gpsStatus: 'OFFLINE',
-            routeId: { in: routeIds },
-          },
-        }),
-        prisma.attendanceCorrection.count({
-          where: {
-            status: 'PENDING',
-            attendance: {
-              routeId: { in: routeIds },
-            },
-          },
-        }),
+        routeIds ? tripsService.countActiveOfflineTrips(routeIds) : Promise.resolve(0),
+        attendanceService.countPendingCorrectionsForAdmin(routeIds ?? null),
       ]);
 
       return {
-        activeTrips: activeTrips.length,
-        checkedIn: activeTrips.reduce((sum, trip) => sum + (trip.boardedCount ?? 0), 0),
+        activeTrips: activeTripsResult.trips.length,
+        checkedIn: activeTripsResult.trips.reduce((sum: number, trip: any) => sum + (trip.boardedCount ?? 0), 0),
         gpsOffline,
         openCorrections,
       };
@@ -700,10 +691,10 @@ export class AdminService {
 
     const stats = await redis.hgetall('dashboard:stats');
     return {
-      activeTrips: parseInt(stats.activeTrips || '0', 10),
-      checkedIn: parseInt(stats.checkedIn || '0', 10),
-      gpsOffline: parseInt(stats.gpsOffline || '0', 10),
-      openCorrections: parseInt(stats.openCorrections || '0', 10)
+      activeTrips: safeInt(stats.activeTrips),
+      checkedIn: safeInt(stats.checkedIn),
+      gpsOffline: safeInt(stats.gpsOffline),
+      openCorrections: safeInt(stats.openCorrections)
     };
   }
 
@@ -711,30 +702,76 @@ export class AdminService {
    * Pattern 1: Get Active Trips Array
    * Iterates real-time trips set to return populated Hash states.
    */
-  async getActiveTrips(access?: ResolvedAdminAccessContext) {
-    const tripIds = await redis.smembers('active-trips');
-    if (!tripIds.length) return [];
-
+  async getActiveTrips(
+    access?: ResolvedAdminAccessContext,
+    pagination?: { page: number; limit: number },
+  ): Promise<{ trips: any[]; total: number }> {
     const routeIds = this.getScopedRouteIds(access);
-    const activeTrips: any[] = [];
-    for (const id of tripIds) {
-      const state = await redis.hgetall(`trip:${id}:state`);
-      if (routeIds && !routeIds.includes(state.routeId || '')) {
+    const skip = pagination ? (pagination.page - 1) * pagination.limit : 0;
+    const stop = pagination ? skip + pagination.limit - 1 : -1;
+
+    let tripIds: string[] = [];
+    let total = 0;
+
+    if (routeIds && routeIds.length === 0) {
+      return { trips: [], total: 0 };
+    }
+
+    if (routeIds && routeIds.length > 0) {
+      const perRouteLimit = pagination ? skip + pagination.limit - 1 : -1;
+      const routeKeys = routeIds.map((routeId) => `active-trips:z:route:${routeId}`);
+      const [counts, routeTripIds] = await Promise.all([
+        Promise.all(routeKeys.map((key) => redis.zcard(key))),
+        Promise.all(routeKeys.map((key) => redis.zrevrange(key, 0, perRouteLimit))),
+      ]);
+
+      total = counts.reduce((sum, count) => sum + count, 0);
+      tripIds = Array.from(new Set(routeTripIds.flat()));
+    } else {
+      total = await redis.zcard('active-trips:z');
+      tripIds = total > 0 ? await redis.zrevrange('active-trips:z', skip, stop) : [];
+    }
+
+    if (!tripIds.length) {
+      return { trips: [], total };
+    }
+
+    const pipeline = redis.pipeline();
+    for (const id of tripIds) pipeline.hgetall(`trip:${id}:state`);
+    const results = tripIds.length > 0 ? await pipeline.exec() as Array<[Error | null, Record<string, string>]> : [];
+
+    let activeTrips: any[] = [];
+    for (let i = 0; i < tripIds.length; i++) {
+      const [err, state] = results[i] ?? [];
+      if (err || !state || Object.keys(state).length === 0) {
+        logger.warn({
+          event: 'active_trip_state_missing',
+          source: 'SYSTEM',
+          meta: { tripId: tripIds[i], error: err?.message },
+        });
         continue;
       }
-      
-      // Parse numerical values back to integers
+      if (routeIds && !routeIds.includes(state.routeId || '')) continue;
+
       activeTrips.push({
-        id,
+        id: tripIds[i],
         ...state,
-        boardedCount: parseInt(state.boardedCount || '0', 10),
-        expectedCount: parseInt(state.expectedCount || '0', 10),
-        startedAt: parseInt(state.startedAt || '0', 10)
+        boardedCount: safeInt(state.boardedCount),
+        expectedCount: safeInt(state.expectedCount),
+        startedAt: safeInt(state.startedAt),
       });
     }
 
-    // Sort by startedAt descending initially (UI will override via urgencyScore)
-    return activeTrips.sort((a, b) => b.startedAt - a.startedAt);
+    activeTrips.sort((a, b) => b.startedAt - a.startedAt);
+
+    if (!pagination) {
+      return { trips: activeTrips, total };
+    }
+
+    return {
+      trips: routeIds && routeIds.length > 0 ? activeTrips.slice(skip, skip + pagination.limit) : activeTrips,
+      total,
+    };
   }
 
   /**
@@ -752,9 +789,9 @@ export class AdminService {
     return {
       id: tripId,
       ...state,
-      boardedCount: parseInt(state.boardedCount || '0', 10),
-      expectedCount: parseInt(state.expectedCount || '0', 10),
-      startedAt: parseInt(state.startedAt || '0', 10)
+      boardedCount: safeInt(state.boardedCount),
+      expectedCount: safeInt(state.expectedCount),
+      startedAt: safeInt(state.startedAt)
     };
   }
 
@@ -794,13 +831,7 @@ export class AdminService {
 
     const tripIds = Array.from(new Set(parsedAlerts.flatMap((alert) => (alert.tripId ? [alert.tripId] : []))));
     const trips = tripIds.length > 0
-      ? await prisma.trip.findMany({
-        where: {
-          id: { in: tripIds },
-          routeId: { in: routeIds },
-        },
-        select: { id: true },
-      })
+      ? await tripsService.getTripsByIdsAndRoutes(tripIds, routeIds ?? [])
       : [];
     const allowedTripIds = new Set(trips.map((trip) => trip.id));
 
@@ -836,34 +867,15 @@ export class AdminService {
       };
     }
 
-    const [stats, outageQueue, lateStarts, unresolvedIncidents, activeTrips] = await Promise.all([
+    const [stats, outageQueue, lateStarts, unresolvedIncidents, activeTripsResult] = await Promise.all([
       this.getLiveDashboardStats(access),
       this.getGpsOutageQueue(access),
       this.getLateStartEntityInputs(access),
-      prisma.incident.findMany({
-        where: {
-          status: { in: ['REPORTED', 'ASSIGNED'] },
-          ...(routeIds ? { trip: { routeId: { in: routeIds } } } : {}),
-        },
-        include: {
-          trip: {
-            select: {
-              id: true,
-              routeId: true,
-              expectedCount: true,
-              driver: { select: { name: true } },
-            },
-          },
-          route: { select: { id: true, name: true } },
-          bus: { select: { number: true, plateNumber: true } },
-          reportedBy: { select: { name: true, role: true } },
-        },
-        orderBy: { reportedAt: 'desc' },
-      }),
+      incidentsService.getActiveIncidentsForCommandCenter(routeIds ?? null),
       this.getActiveTrips(access),
     ]);
 
-    const tripIdToDriver = new Map(activeTrips.map((trip) => [trip.id, trip.driverName ?? null]));
+    const tripIdToDriver = new Map(activeTripsResult.trips.map((trip: any) => [trip.id, trip.driverName ?? null]));
     const entities: AdminCommandEntity[] = [];
 
     for (const incident of unresolvedIncidents) {
@@ -878,7 +890,7 @@ export class AdminService {
       entities.push(this.buildLateStartEntity(lateStart));
     }
 
-    for (const trip of activeTrips.filter((item) => item.gpsStatus === 'STALE')) {
+    for (const trip of activeTripsResult.trips.filter((item: any) => item.gpsStatus === 'STALE')) {
       entities.push({
         id: `trip-risk:${trip.id}`,
         kind: 'TRIP_RISK',
@@ -1018,8 +1030,8 @@ export class AdminService {
         endedAt: null,
         outageSince: offlineSince ? new Date(offlineSince).toISOString() : null,
         outageDurationMinutes: offlineSince ? Math.max(1, Math.floor((Date.now() - offlineSince) / 60000)) : null,
-        expectedCount: parseInt(state.expectedCount || '0', 10),
-        boardedCount: parseInt(state.boardedCount || '0', 10),
+        expectedCount: safeInt(state.expectedCount),
+        boardedCount: safeInt(state.boardedCount),
         pendingStudents: activePendingCountMap.get(tripId) ?? 0,
         pendingOutageCorrections: activeCorrectionCountMap.get(tripId) ?? 0,
         delegateActive: delegateActiveRaw === 1,
@@ -1028,19 +1040,7 @@ export class AdminService {
       };
     });
 
-    const completedTrips = await prisma.trip.findMany({
-      where: {
-        status: 'COMPLETED',
-        gpsOutageStart: { not: null },
-        ...(routeIds ? { routeId: { in: routeIds } } : {}),
-      },
-      include: {
-        bus: { select: { number: true } },
-        route: { select: { id: true, name: true } },
-      },
-      orderBy: { endedAt: 'desc' },
-      take: 25,
-    });
+    const completedTrips = await tripsService.getCompletedOutageTrips(routeIds ?? null);
 
     const completedTripIds = completedTrips.map((trip) => trip.id);
     const completedPendingCountMap = await this.getPendingStudentCountMap(completedTripIds);
@@ -1096,94 +1096,49 @@ export class AdminService {
     };
   }
 
-  async getGpsOutageCorrections(access?: ResolvedAdminAccessContext): Promise<AdminGpsOutageCorrection[]> {
+  async getGpsOutageCorrections(
+    access?: ResolvedAdminAccessContext,
+    pagination?: { page: number; limit: number },
+  ): Promise<{ corrections: AdminGpsOutageCorrection[]; total: number }> {
     const routeIds = this.getScopedRouteIds(access);
     if (routeIds && routeIds.length === 0) {
-      return [];
+      return { corrections: [], total: 0 };
     }
 
-    const corrections = await prisma.attendanceCorrection.findMany({
-      where: {
-        status: 'PENDING',
-        metadata: { path: ['busGPSOffline'], equals: true },
-        ...(routeIds ? { attendance: { routeId: { in: routeIds } } } : {}),
-      },
-      include: {
-        requestedBy: {
-          select: {
-            id: true,
-            name: true,
-            rollNumber: true,
-            department: true,
-          },
-        },
-        attendance: {
-          select: {
-            id: true,
-            trip: {
-              select: {
-                id: true,
-                routeId: true,
-                bus: {
-                  select: {
-                    number: true,
-                    plateNumber: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { corrections, total } = await attendanceService.getGpsOutageCorrectionsForAdmin(routeIds ?? null, pagination);
 
-    return corrections.map((correction) => ({
-      id: correction.id,
-      reason: correction.reason,
-      createdAt: correction.createdAt.toISOString(),
-      requestedBy: correction.requestedBy,
-      attendance: correction.attendance,
-      metadata:
-        typeof correction.metadata === 'object' && correction.metadata !== null
-          ? correction.metadata as Record<string, unknown>
-          : null,
-    }));
+    return {
+      corrections: corrections.map((correction) => ({
+        id: correction.id,
+        reason: correction.reason,
+        createdAt: correction.createdAt.toISOString(),
+        requestedBy: correction.requestedBy,
+        attendance: correction.attendance,
+        metadata:
+          typeof correction.metadata === 'object' && correction.metadata !== null
+            ? correction.metadata as Record<string, unknown>
+            : null,
+      })),
+      total,
+    };
   }
 
   // ==========================================
   // PATTERN 2: OPERATIONAL (PostgreSQL + Cache)
   // ==========================================
 
-  async getPendingCorrections(access?: ResolvedAdminAccessContext) {
+  async getPendingCorrections(
+    access?: ResolvedAdminAccessContext,
+    pagination?: { page: number; limit: number },
+  ) {
     const routeIds = this.getScopedRouteIds(access);
     if (routeIds && routeIds.length === 0) {
-      return [];
+      return { corrections: [], total: 0 };
     }
 
-    const cacheKey = this.getScopedCacheKey('admin:corrections:pending', access);
-    const cached = await cacheGet(cacheKey);
-    if (cached) return cached;
+    const { corrections, total } = await attendanceService.getPendingCorrectionsForAdmin(routeIds ?? null, pagination);
 
-    const corrections = await prisma.attendanceCorrection.findMany({
-      where: {
-        status: 'PENDING',
-        ...(routeIds ? { attendance: { routeId: { in: routeIds } } } : {}),
-      },
-      include: {
-        attendance: {
-          include: { 
-            user: { select: { name: true, rollNumber: true, department: true } }, 
-            trip: { select: { busId: true, routeId: true, date: true } }
-          }
-        },
-        requestedBy: { select: { name: true, role: true } }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    cacheSet(cacheKey, corrections, 30);
-    return corrections;
+    return { corrections, total };
   }
 
   async resolveCorrection(
@@ -1200,38 +1155,7 @@ export class AdminService {
       attendanceStatus: correction.attendance.status,
     };
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const res = await tx.attendanceCorrection.update({
-        where: { id: correctionId },
-        data: {
-          status,
-          reviewedById: reviewerId,
-          reviewedAt: new Date()
-        }
-      });
-
-      if (status === 'APPROVED') {
-        // Find existing event to mark transition
-        await tx.attendanceEvent.create({
-          data: {
-            attendanceId: correction.attendanceId,
-            type: 'MANUAL_CORRECTION',
-            method: 'MANUAL_ADMIN',
-            actorId: reviewerId,
-            previousStatus: correction.attendance.status,
-            newStatus: 'PRESENT',
-            metadata: { reason: correction.reason }
-          }
-        });
-
-        await tx.attendanceLog.update({
-          where: { id: correction.attendanceId },
-          data: { status: 'PRESENT' }
-        });
-      }
-
-      return res;
-    });
+    const updated = await attendanceService.resolveCorrectionForAdmin(correctionId, status, reviewerId, correction);
 
     // Invalidate Pattern 2 cache and live stats
     await cacheDel(this.getScopedCacheKey('admin:corrections:pending', access));
@@ -1285,15 +1209,7 @@ export class AdminService {
   ) {
     const incident = await this.getScopedIncidentOrThrow(incidentId, access, 'RESOLVE_INCIDENTS');
 
-    const updated = await prisma.incident.update({
-      where: { id: incidentId },
-      data: {
-        status: 'RESOLVED',
-        resolvedById: resolverId,
-        resolutionNotes,
-        resolvedAt: new Date(),
-      },
-    });
+    const updated = await incidentsService.resolveIncidentForAdmin(incidentId, resolverId, resolutionNotes);
 
     if (io) {
       io.to('admin').emit('incident:updated', {
@@ -1314,16 +1230,7 @@ export class AdminService {
     const cached = await cacheGet(cacheKey);
     if (cached) return cached;
 
-    const logs = await prisma.attendanceLog.findMany({
-      where: {
-        tripId,
-        routeId: trip.routeId,
-      },
-      include: {
-        user: { select: { id: true, name: true, rollNumber: true, department: true } }
-      },
-      orderBy: { user: { name: 'asc' } }
-    });
+    const logs = await attendanceService.getTripStudentsForAdmin(tripId, trip.routeId);
 
     cacheSet(cacheKey, logs, 10);
     return logs;
@@ -1336,19 +1243,7 @@ export class AdminService {
     if (cached) return cached;
 
     // Get events from attendance
-    const attendanceEvents = await prisma.attendanceEvent.findMany({
-      where: {
-        attendance: {
-          tripId,
-          routeId: trip.routeId,
-        },
-      },
-      include: {
-        actor: { select: { name: true, role: true } },
-        attendance: { include: { user: { select: { name: true, rollNumber: true } } } }
-      },
-      orderBy: { timestamp: 'desc' }
-    });
+    const attendanceEvents = await attendanceService.getTripTimelineForAdmin(tripId, trip.routeId);
 
     // Format them into a generic timeline stream
     const timelineEvents = attendanceEvents.map(e => ({
@@ -1364,10 +1259,14 @@ export class AdminService {
     return timelineEvents;
   }
 
-  async getIncidents(status?: string, access?: ResolvedAdminAccessContext) {
+  async getIncidents(
+    status?: string,
+    access?: ResolvedAdminAccessContext,
+    pagination?: { page: number; limit: number },
+  ) {
     const routeIds = this.getScopedRouteIds(access);
     if (routeIds && routeIds.length === 0) {
-      return [];
+      return { incidents: [], total: 0 };
     }
 
     const whereClause: any = {};
@@ -1380,103 +1279,38 @@ export class AdminService {
       };
     }
 
-    return await prisma.incident.findMany({
-      where: whereClause,
-      include: {
-        trip: {
-          select: {
-            id: true,
-            routeId: true,
-            date: true,
-            expectedCount: true,
-            driver: { select: { name: true } },
-          },
-        },
-        route: { select: { id: true, name: true } },
-        bus: { select: { number: true, plateNumber: true } },
-        reportedBy: { select: { name: true, role: true } },
-        resolvedBy: { select: { name: true } }
-      },
-      orderBy: { reportedAt: 'desc' }
-    });
+    const { incidents, total } = await incidentsService.getIncidentsForAdmin(status, routeIds, pagination);
+
+    return { incidents, total };
   }
 
   async getMessages(params: MessageQuery = {}, access?: ResolvedAdminAccessContext) {
-    const { busId, limit = 50, contextType, contextId } = params;
     const routeIds = this.getScopedRouteIds(access);
     if (routeIds && routeIds.length === 0) {
       return [];
     }
 
-    let whereClause: Record<string, unknown> = {};
-
-    if (contextType && contextId) {
-      whereClause = { contextType, contextId };
-    } else if (busId) {
-      whereClause = { busId };
-    } else {
-      whereClause = {
-        OR: [
-          { type: 'BROADCAST_ALL' },
-          { contextType: 'BROADCAST', contextId: 'GLOBAL' },
-        ],
-      };
-    }
-
-    if (routeIds) {
-      whereClause = {
-        AND: [
-          whereClause,
-          {
-            OR: [
-              { routeId: { in: routeIds } },
-              {
-                AND: [
-                  {
-                    OR: [
-                      { type: 'BROADCAST_ALL' },
-                      { contextType: 'BROADCAST', contextId: 'GLOBAL' },
-                    ],
-                  },
-                  { routeId: null },
-                ],
-              },
-            ],
-          },
-        ],
-      };
-    }
-
-    return await (prisma.message as any).findMany({
-      where: whereClause,
-      include: {
-        sender: { select: { name: true, role: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit
-    });
+    return findMessages(params, routeIds);
   }
 
   async sendMessage(senderId: string, input: AdminMessageInput, access?: ResolvedAdminAccessContext) {
     const resolved = await this.resolveMessageContext(input.context, input.busId, input.routeId, input.type);
     this.assertRouteAction(access, 'SEND_MESSAGE_TO_DRIVER', resolved.routeId);
+    if (!isMessageType(resolved.derivedType)) {
+      throw new BadRequestError('VALIDATION_ERROR');
+    }
 
-    const message = await (prisma.message as any).create({
-      data: {
-        senderId,
-        body: input.body,
-        busId: resolved.busId,
-        routeId: resolved.routeId,
-        tripId: resolved.tripId,
-        incidentId: resolved.incidentId,
-        contextType: resolved.contextType,
-        contextId: resolved.contextId,
-        type: resolved.derivedType,
-        priority: input.priority ?? 'NORMAL'
-      },
-      include: {
-        sender: { select: { name: true, role: true } }
-      }
+    const message = await createMessage({
+      senderId,
+      body: input.body,
+      busId: resolved.busId,
+      routeId: resolved.routeId,
+      tripId: resolved.tripId,
+      incidentId: resolved.incidentId,
+      contextType: resolved.contextType,
+      contextId: resolved.contextId,
+      type: resolved.derivedType,
+      priority: input.priority ?? 'NORMAL',
     });
 
     if (io) {
@@ -1518,13 +1352,7 @@ export class AdminService {
     note?: string,
     access?: ResolvedAdminAccessContext,
   ) {
-    const trip = await prisma.trip.findUnique({
-      where: { id: tripId },
-      include: {
-        bus: { select: { number: true } },
-        route: { select: { id: true, name: true } },
-      },
-    });
+    const trip = await tripsService.getTripWithBusAndRoute(tripId);
 
     if (!trip) {
       throw new NotFoundError('TRIP_NOT_FOUND');
@@ -1532,14 +1360,7 @@ export class AdminService {
 
     this.assertRouteAction(access, 'SEND_MESSAGE_TO_DRIVER', trip.routeId);
 
-    const assignments = await prisma.routeAssignment.findMany({
-      where: {
-        routeId: trip.routeId,
-        isActive: true,
-        user: { role: 'STUDENT', isActive: true },
-      },
-      select: { userId: true },
-    });
+    const assignments = await adminRepository.findActiveRouteAssignments([trip.routeId]);
     const userIds = assignments.map((assignment) => assignment.userId);
 
     const body = note?.trim() || `Transport office update for Bus ${trip.bus.number} on ${trip.route.name}.`;
@@ -1580,13 +1401,7 @@ export class AdminService {
     note?: string,
     access?: ResolvedAdminAccessContext,
   ) {
-    const trip = await prisma.trip.findUnique({
-      where: { id: tripId },
-      include: {
-        bus: { select: { number: true } },
-        route: { select: { id: true, name: true } },
-      },
-    });
+    const trip = await tripsService.getTripWithBusAndRoute(tripId);
 
     if (!trip) {
       throw new NotFoundError('TRIP_NOT_FOUND');
@@ -1595,17 +1410,8 @@ export class AdminService {
     this.assertRouteAction(access, 'COORDINATOR_OVERRIDE', trip.routeId);
 
     const [coordinators, officers] = await Promise.all([
-      prisma.routeCoordinator.findMany({
-        where: { routeId: trip.routeId },
-        select: { userId: true },
-      }),
-      prisma.user.findMany({
-        where: {
-          role: { in: ['TRANSPORT_OFFICER', 'MANAGEMENT'] },
-          isActive: true,
-        },
-        select: { id: true },
-      }),
+      adminRepository.findCoordinatorsForRoute(trip.routeId),
+      adminRepository.findActiveUsersByRole(['TRANSPORT_OFFICER', 'MANAGEMENT']),
     ]);
 
     const userIds = Array.from(new Set([
@@ -1652,14 +1458,7 @@ export class AdminService {
     note?: string,
     access?: ResolvedAdminAccessContext,
   ) {
-    const incident = await prisma.incident.findUnique({
-      where: { id: incidentId },
-      include: {
-        bus: { select: { number: true } },
-        route: { select: { name: true } },
-        trip: { select: { routeId: true } },
-      },
-    });
+    const incident = await incidentsService.getIncidentWithBusAndRoute(incidentId);
 
     if (!incident) {
       throw new NotFoundError('INCIDENT_NOT_FOUND');
@@ -1675,24 +1474,10 @@ export class AdminService {
         ? 'PRINCIPAL'
         : 'PRINCIPAL';
 
-    const updated = await prisma.incident.update({
-      where: { id: incidentId },
-      data: {
-        escalationLevel: nextLevel,
-        status: 'ASSIGNED',
-        assignedAt: incident.assignedAt ?? new Date(),
-      },
-      include: {
-        bus: { select: { number: true } },
-        route: { select: { name: true } },
-      },
-    });
+    const updated = await incidentsService.updateIncidentEscalationForAdmin(incidentId, nextLevel, incident.assignedAt ?? new Date());
 
     const targetRoles = nextLevel === 'TRANSPORT_OFFICER' ? ['TRANSPORT_OFFICER'] : ['MANAGEMENT'];
-    const recipients = await prisma.user.findMany({
-      where: { role: { in: targetRoles as any }, isActive: true },
-      select: { id: true },
-    });
+    const recipients = await findActiveUsersByRole(targetRoles);
 
     const body = note?.trim()
       || `Incident on Bus ${updated.bus.number} escalated to ${nextLevel.replace(/_/g, ' ')}.`;
@@ -1746,29 +1531,9 @@ export class AdminService {
   ): Promise<AdminSubstituteCandidate[]> {
     const trip = await this.getScopedTripOrThrow(tripId, access, 'ASSIGN_SUBSTITUTE');
 
-    const activeTrips = await prisma.trip.findMany({
-      where: { status: 'ACTIVE' },
-      select: { busId: true },
-    });
-    const activeBusIds = new Set(activeTrips.map((item) => item.busId));
+    const activeBusIds = new Set(await tripsService.getActiveBusIds());
 
-    const buses = await prisma.bus.findMany({
-      where: {
-        isActive: true,
-        id: { not: trip.busId },
-      },
-      include: {
-        assignments: {
-          where: { isActive: true },
-          include: {
-            route: { select: { id: true, name: true } },
-            driver: { select: { id: true, name: true } },
-          },
-          take: 1,
-        },
-      },
-      orderBy: { number: 'asc' },
-    });
+    const buses = await adminRepository.findSubstituteBuses(trip.busId);
 
     return buses
       .map((bus) => {
@@ -1794,18 +1559,8 @@ export class AdminService {
     access?: ResolvedAdminAccessContext,
   ) {
     const [incident, alternateBus] = await Promise.all([
-      prisma.incident.findUnique({
-        where: { id: incidentId },
-        include: {
-          bus: { select: { number: true } },
-          route: { select: { name: true } },
-          trip: { select: { routeId: true } },
-        },
-      }),
-      prisma.bus.findUnique({
-        where: { id: alternateBusId },
-        select: { id: true, number: true, isActive: true },
-      }),
+      incidentsService.getIncidentWithBusAndRoute(incidentId),
+      findBusById(alternateBusId),
     ]);
 
     if (!incident) {
@@ -1819,22 +1574,12 @@ export class AdminService {
       throw new BadRequestError('ALTERNATE_BUS_MATCHES_CURRENT_BUS');
     }
 
-    const activeTrip = await prisma.trip.findFirst({
-      where: { busId: alternateBus.id, status: 'ACTIVE' },
-      select: { id: true },
-    });
+    const activeTrip = await tripsService.getActiveTripByBus(alternateBus.id);
     if (activeTrip) {
       throw new BadRequestError('ALTERNATE_BUS_BUSY');
     }
 
-    const updated = await prisma.incident.update({
-      where: { id: incidentId },
-      data: {
-        status: 'ASSIGNED',
-        assignedAt: incident.assignedAt ?? new Date(),
-        alternateBusId: alternateBus.id,
-      },
-    });
+    const updated = await incidentsService.assignSubstituteForAdmin(incidentId, alternateBus.id, incident.assignedAt ?? new Date());
 
     const body = `Substitute Bus ${alternateBus.number} assigned for Bus ${incident.bus.number}.`;
 

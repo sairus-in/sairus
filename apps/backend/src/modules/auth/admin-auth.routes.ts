@@ -316,7 +316,7 @@ export async function adminAuthRoutes(app: FastifyInstance) {
     });
 
     clearAdminSessionCookies(reply);
-    reply.send(ok({ message: 'Logged out' }, req.id));
+    return reply.send(ok({ message: 'Logged out' }, req.id));
   });
 
   app.post<{ Body: { email: string } }>('/forgot-password', async (req, reply) => {

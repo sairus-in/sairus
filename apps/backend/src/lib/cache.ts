@@ -6,6 +6,7 @@ import { CACHE_TTL } from 'shared';
 import { logger } from './logger';
 import { prisma } from './prisma';
 import { redis } from './redis';
+import { scanKeys } from './redis-scan';
 
 type CachedRouteAssignment = Prisma.RouteAssignmentGetPayload<{
   include: {
@@ -123,7 +124,7 @@ export async function cacheHSet(key: string, value: Record<string, string | numb
 
 export async function invalidateAdminScopedCache(adminUserId: string): Promise<void> {
   try {
-    const keys = await redis.keys(`admin:${adminUserId}:*`);
+    const keys = await scanKeys(`admin:${adminUserId}:*`);
     if (keys.length > 0) {
       await redis.del(...keys);
     }

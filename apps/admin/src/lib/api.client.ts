@@ -94,6 +94,9 @@ rawAxiosClient.interceptors.request.use(attachAdminRequestHeaders);
 
 axiosClient.interceptors.response.use(
   (response) => {
+    if (response.status === 204) {
+      return null;
+    }
     if (response.data && typeof response.data === 'object' && response.data.success === true && 'data' in response.data) {
       return response.data.data;
     }
@@ -113,6 +116,10 @@ export const api = {
   },
   post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return axiosClient.post(url, data, config) as unknown as Promise<T>;
+  },
+  /** Use for endpoints that return 204 No Content. Returns Promise<void> to make the contract explicit. */
+  postNoContent(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<void> {
+    return axiosClient.post(url, data, config) as unknown as Promise<void>;
   },
   put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return axiosClient.put(url, data, config) as unknown as Promise<T>;

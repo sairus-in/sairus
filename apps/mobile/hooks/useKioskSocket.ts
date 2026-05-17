@@ -13,8 +13,27 @@ export function useKioskSocket(tripId: string, busId?: string) {
   const addAdminMessage = useTripStore((state) => state.addAdminMessage);
   const setSocketStatus = useTripStore((state) => state.setSocketStatus);
 
+  // DEV ONLY: inject a rotating fake QR token every 50 s; skip real socket.
   useEffect(() => {
-    if (!token) {
+    if (!__DEV__ || !token?.startsWith('dev_token_')) return;
+
+    const refreshQR = () => {
+      // Encode a minimal JSON payload that QRCode will render without crashing
+      setQR(
+        JSON.stringify({ tripId, nonce: `DEV_${Date.now()}`, sig: 'devonly' }),
+        Date.now() + 60_000,
+      );
+    };
+
+    refreshQR();
+    setSocketStatus('connected');
+
+    const interval = setInterval(refreshQR, 50_000);
+    return () => clearInterval(interval);
+  }, [token, tripId, setQR, setSocketStatus]);
+
+  useEffect(() => {
+    if (!token || (__DEV__ && token.startsWith('dev_token_'))) {
       return;
     }
 

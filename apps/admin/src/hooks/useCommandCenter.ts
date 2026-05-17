@@ -10,10 +10,11 @@ import { QK } from '../lib/query-keys';
 const incidentScopeKey = [QK.incidents()[0], QK.incidents()[1]] as const;
 const messageScopeKey = [QK.messages()[0], QK.messages()[1]] as const;
 
-export const useCommandCenter = () => {
+export const useCommandCenter = (enabled = true) => {
   return useQuery({
     queryKey: QK.commandCenter(),
     queryFn: (): Promise<AdminCommandCenterPayload> => api.get('/v1/admin/live/command-center'),
+    enabled,
   });
 };
 

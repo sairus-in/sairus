@@ -3,6 +3,7 @@ export * from './constants';
 export * from './utils';
 export * from './validators';
 export * from './policy';
+export * from './auth';
 export * from './lib/response';
 export * from './lib/error-codes';
 export * from './branded';

@@ -4,12 +4,13 @@ import { api } from '../lib/api.client';
 import { QK } from '../lib/query-keys';
 export type LiveAlert = AdminLiveAlert;
 
-export const useAlerts = () => {
+export const useAlerts = (enabled = true) => {
   return useQuery({
     queryKey: QK.alerts(),
     queryFn: async (): Promise<LiveAlert[]> => {
       // Return top urgent items from backend stream
       return api.get('/v1/admin/live/alerts');
     },
+    enabled,
   });
 };

@@ -3,8 +3,16 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../store/auth.store';
-import { colors, spacing, typography, radii } from '../constants/theme';
+import { typography } from '../constants/theme';
 import { performLogout } from '../lib/logout';
+
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  btnBg: '#356C8F',
+  btnText: '#FFFFFF',
+};
 
 export default function UnsupportedRoleScreen() {
   const router = useRouter();
@@ -16,58 +24,63 @@ export default function UnsupportedRoleScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Role Not Supported</Text>
-        <Text style={styles.body}>
-          {user?.role ?? 'This role'} does not have a mobile workflow yet. Please use the admin system or contact transport operations.
+    <SafeAreaView style={s.container}>
+      <View style={s.layout}>
+        <Text style={s.label}>Access restricted</Text>
+        <Text style={s.title}>Role not supported</Text>
+        <Text style={s.body}>
+          {user?.role ?? 'This role'} doesn't have a mobile workflow yet.
+          Please use the admin system or contact transport operations.
         </Text>
-        <TouchableOpacity style={styles.button} onPress={handleLogout} activeOpacity={0.8}>
-          <Text style={styles.buttonText}>Back to Login</Text>
+        <TouchableOpacity style={s.btn} onPress={handleLogout} activeOpacity={0.85}>
+          <Text style={s.btnLabel}>Back to Login</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: C.bg,
     justifyContent: 'center',
-    padding: spacing.xl,
   },
-  card: {
-    backgroundColor: colors.card.bg,
-    borderWidth: 1,
-    borderColor: colors.card.border,
-    borderRadius: radii.md,
-    padding: spacing.xl,
-    gap: spacing.md,
+  layout: {
+    paddingHorizontal: 28,
+    gap: 12,
+  },
+  label: {
+    fontFamily: typography.family,
+    fontSize: 13,
+    color: C.muted,
   },
   title: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.h2,
-    fontWeight: typography.weights.bold,
-    color: colors.text.primary,
+    fontSize: 28,
+    fontWeight: '700',
+    color: C.ink,
+    letterSpacing: -0.5,
   },
   body: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    color: colors.text.secondary,
-    lineHeight: 22,
+    fontSize: 15,
+    color: C.muted,
+    lineHeight: 23,
+    marginTop: 2,
   },
-  button: {
-    marginTop: spacing.md,
-    backgroundColor: colors.button.primary.bg,
-    borderRadius: radii.button,
-    paddingVertical: 14,
+  btn: {
+    backgroundColor: C.btnBg,
+    height: 54,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
   },
-  buttonText: {
+  btnLabel: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    fontWeight: typography.weights.semibold,
-    color: colors.button.primary.text,
+    fontSize: 16,
+    fontWeight: '600',
+    color: C.btnText,
   },
 });

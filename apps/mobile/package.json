@@ -20,10 +20,14 @@
     "submit:android": "eas submit --platform android --profile production"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.2.3",
+    "@expo-google-fonts/ubuntu-mono": "^0.2.3",
+    "@gorhom/bottom-sheet": "^5.2.14",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/netinfo": "11.3.1",
     "@react-native-firebase/app": "^23.8.8",
     "@react-native-firebase/auth": "^23.8.8",
+    "@react-native-firebase/messaging": "^23.8.8",
     "@shopify/flash-list": "1.6.4",
     "@tanstack/react-query": "^5.51.0",
     "axios": "^1.7.0",
@@ -37,6 +41,7 @@
     "expo-font": "~12.0.0",
     "expo-haptics": "~13.0.0",
     "expo-keep-awake": "~13.0.0",
+    "expo-linear-gradient": "~13.0.2",
     "expo-linking": "~6.3.0",
     "expo-location": "~17.0.0",
     "expo-notifications": "~0.28.0",

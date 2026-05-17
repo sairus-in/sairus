@@ -1,9 +1,4 @@
 // app/(driver)/breakdown.tsx — Report breakdown with incident type selection
-// HARDENED v3:
-//   - All hardcoded hex → theme tokens (LAW 2)
-//   - console.error → analytics.error (LAW 5)
-//   - analytics.track on report submission (critical safety action) (LAW 6)
-//   - ScreenErrorBoundary wrapping
 import React, { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
@@ -11,11 +6,27 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { driverService } from '../../services/driver.service';
-import { colors, typography, spacing, radii } from '../../constants/theme';
+import { typography } from '../../constants/theme';
 import { t } from '../../i18n';
 import * as Haptics from 'expo-haptics';
 import { analytics } from '../../lib/analytics';
 import { ScreenErrorBoundary } from '../../components/shared/ScreenErrorBoundary';
+
+// ── Local tokens ──────────────────────────────────────────────────
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  surface: '#FFFFFF',
+  optionSelected: '#356C8F',
+  optionSelectedText: '#FFFFFF',
+  optionText: '#1A1A1C',
+  btnBg: '#356C8F',
+  btnText: '#FFFFFF',
+  btnDisabled: 'rgba(53, 108, 143, 0.25)',
+  link: '#356C8F',
+  linkMuted: '#565656',
+};
 
 const incidentTypes = ['FLAT_TYRE', 'ENGINE_FAILURE', 'ACCIDENT', 'FUEL_ISSUE', 'OTHER'] as const;
 
@@ -55,91 +66,158 @@ function BreakdownContent() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.back}>← Back</Text>
+    <SafeAreaView style={s.container}>
+      <View style={s.layout}>
+
+        {/* Back */}
+        <TouchableOpacity onPress={() => router.back()} style={s.backWrap} activeOpacity={0.7}>
+          <Text style={s.back}>← Back</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>{t('breakdown.title')}</Text>
-        <Text style={styles.subtitle}>{t('breakdown.subtitle')}</Text>
-      </View>
 
-      <View style={styles.body}>
-        {incidentTypes.map((type) => (
-          <TouchableOpacity
-            key={type}
-            style={[styles.option, selected === type && styles.optionSelected]}
-            onPress={() => setSelected(type)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.optionText, selected === type && styles.optionTextSelected]}>
-              {t(`breakdown.types.${type}`)}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {/* Heading */}
+        <View style={s.headingBlock}>
+          <Text style={s.title}>{t('breakdown.title')}</Text>
+          <Text style={s.subtitle}>{t('breakdown.subtitle')}</Text>
+        </View>
 
-        <View style={styles.actions}>
+        {/* Incident type options */}
+        <View style={s.options}>
+          {incidentTypes.map((type) => (
+            <TouchableOpacity
+              key={type}
+              style={[s.option, selected === type && s.optionSelected]}
+              onPress={() => setSelected(type)}
+              activeOpacity={0.75}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected === type }}
+            >
+              <Text style={[s.optionText, selected === type && s.optionTextSelected]}>
+                {t(`breakdown.types.${type}`)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Actions */}
+        <View style={s.actions}>
           <TouchableOpacity
-            style={[styles.reportBtn, !selected && styles.reportDisabled]}
+            style={[s.btn, (!selected || submitting) && s.btnDisabled]}
             onPress={handleReport}
             disabled={!selected || submitting}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
+            accessibilityLabel={submitting ? 'Submitting breakdown report' : t('breakdown.reportNow')}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !selected || submitting, busy: submitting }}
           >
-            {submitting ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Text style={styles.reportText}>{t('breakdown.reportNow')}</Text>
-            )}
+            {submitting
+              ? <ActivityIndicator color={C.btnText} />
+              : <Text style={s.btnText}>{t('breakdown.reportNow')}</Text>
+            }
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.back()} style={styles.cancelBtn}>
-            <Text style={styles.cancelText}>{t('breakdown.cancel')}</Text>
+
+          <TouchableOpacity onPress={() => router.back()} style={s.cancelWrap} activeOpacity={0.7}>
+            <Text style={s.cancelText}>{t('breakdown.cancel')}</Text>
           </TouchableOpacity>
         </View>
+
       </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.surface },
-  header: { paddingHorizontal: spacing.xl, paddingTop: spacing.md },
+const s = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
+  layout: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 36,
+    gap: 24,
+  },
+
+  // Back
+  backWrap: {
+    alignSelf: 'flex-start',
+  },
   back: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    color: colors.brand.primary, marginBottom: spacing.md,
+    fontFamily: typography.family,
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.link,
+  },
+
+  // Heading
+  headingBlock: {
+    gap: 6,
   },
   title: {
-    fontFamily: typography.family, fontSize: typography.sizes.h1,
-    fontWeight: typography.weights.bold, color: colors.text.primary,
+    fontFamily: typography.family,
+    fontSize: 26,
+    fontWeight: '700',
+    color: C.ink,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    color: colors.text.secondary, marginTop: 2,
+    fontFamily: typography.family,
+    fontSize: 15,
+    color: C.muted,
+    lineHeight: 22,
   },
-  body: { paddingHorizontal: spacing.xl, paddingTop: spacing.xl },
+
+  // Options
+  options: {
+    gap: 8,
+    flex: 1,
+  },
   option: {
-    backgroundColor: colors.card.bg, borderWidth: 1.5, borderColor: colors.card.border,
-    borderRadius: radii.sm, paddingVertical: spacing.md, paddingHorizontal: spacing.md,
-    marginBottom: spacing.xs,
+    backgroundColor: C.surface,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
   },
-  optionSelected: { borderColor: colors.error.border, backgroundColor: colors.error.bg },
+  optionSelected: {
+    backgroundColor: C.optionSelected,
+  },
   optionText: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    fontWeight: typography.weights.medium, color: colors.text.primary,
+    fontFamily: typography.family,
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.optionText,
   },
-  optionTextSelected: { color: colors.error.text },
-  actions: { marginTop: spacing.xl },
-  reportBtn: {
-    backgroundColor: colors.error.text, paddingVertical: 15,
-    borderRadius: radii.button, alignItems: 'center', minHeight: 50,
+  optionTextSelected: {
+    color: C.optionSelectedText,
   },
-  reportDisabled: { opacity: 0.4 },
-  reportText: {
-    fontFamily: typography.family, fontSize: 15,
-    fontWeight: typography.weights.semibold, color: colors.white,
+
+  // Actions
+  actions: {
+    gap: 10,
   },
-  cancelBtn: { marginTop: spacing.sm, alignItems: 'center' },
+  btn: {
+    backgroundColor: C.btnBg,
+    height: 54,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnDisabled: {
+    opacity: 0.35,
+  },
+  btnText: {
+    fontFamily: typography.family,
+    fontSize: 16,
+    fontWeight: '600',
+    color: C.btnText,
+  },
+  cancelWrap: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
   cancelText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    color: colors.text.muted,
+    fontFamily: typography.family,
+    fontSize: 14,
+    color: C.linkMuted,
   },
 });

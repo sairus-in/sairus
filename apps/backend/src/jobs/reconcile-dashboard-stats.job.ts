@@ -11,7 +11,7 @@ export async function reconcileDashboardStats(): Promise<void> {
     const today = getISODateIST(new Date());
     const startedAt = Date.now();
 
-    const [activeTrips, checkedIn, openCorrections, activeTripRows, currentGpsOffline] = await Promise.all([
+    const [activeTrips, checkedIn, openCorrections, activeTripRows, currentGpsOffline, cachedRouteIds] = await Promise.all([
       prisma.trip.count({
         where: { status: 'ACTIVE', date: today },
       }),
@@ -26,9 +26,10 @@ export async function reconcileDashboardStats(): Promise<void> {
       }),
       prisma.trip.findMany({
         where: { status: 'ACTIVE', date: today },
-        select: { id: true },
+        select: { id: true, routeId: true, startedAt: true },
       }),
       redis.hget('dashboard:stats', 'gpsOffline'),
+      redis.smembers('active-trips:route-ids'),
     ]);
 
     const pipeline = redis.pipeline();
@@ -39,10 +40,21 @@ export async function reconcileDashboardStats(): Promise<void> {
       gpsOffline: currentGpsOffline ?? '0',
     });
     pipeline.del('active-trips');
+    pipeline.del('active-trips:z');
+    pipeline.del('active-trips:route-ids');
+    if (cachedRouteIds.length > 0) {
+      pipeline.del(...cachedRouteIds.map((routeId) => `active-trips:z:route:${routeId}`));
+    }
 
     const activeTripIds = activeTripRows.map((trip) => trip.id);
     if (activeTripIds.length > 0) {
+      const activeRouteIds = Array.from(new Set(activeTripRows.map((trip) => trip.routeId)));
       pipeline.sadd('active-trips', ...activeTripIds);
+      pipeline.sadd('active-trips:route-ids', ...activeRouteIds);
+      activeTripRows.forEach((trip) => {
+        pipeline.zadd('active-trips:z', trip.startedAt?.getTime() ?? startedAt, trip.id);
+        pipeline.zadd(`active-trips:z:route:${trip.routeId}`, trip.startedAt?.getTime() ?? startedAt, trip.id);
+      });
     }
 
     await pipeline.exec();

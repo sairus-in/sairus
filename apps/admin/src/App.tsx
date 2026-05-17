@@ -7,15 +7,14 @@ import { useAuthStore } from './store/auth.store';
 import { queryClient } from './lib/query-client';
 import { api } from './lib/api.client';
 import { isAuthError } from './lib/api-error';
-import { getDefaultRoute } from './config/routing.config';
+import { getDefaultRoute } from './config/nav.config';
 
-const LiveOpsShell = lazy(() => import('./shells/LiveOpsShell').then((module) => ({ default: module.LiveOpsShell })));
-const AdminDataShell = lazy(() => import('./shells/AdminDataShell').then((module) => ({ default: module.AdminDataShell })));
+const CommandShell = lazy(() => import('./shells/CommandShell').then((module) => ({ default: module.CommandShell })));
 const Dashboard = lazy(() => import('./pages/ops/Dashboard').then((module) => ({ default: module.Dashboard })));
 const FleetMap = lazy(() => import('./pages/ops/FleetMap').then((module) => ({ default: module.FleetMap })));
 const TripDetail = lazy(() => import('./pages/ops/TripDetail').then((module) => ({ default: module.TripDetail })));
+const TripsList = lazy(() => import('./pages/ops/TripsList').then((module) => ({ default: module.TripsList })));
 const AttendanceReports = lazy(() => import('./pages/data/AttendanceReports').then((module) => ({ default: module.AttendanceReports })));
-const CommandPalette = lazy(() => import('./components/ops/CommandPalette').then((module) => ({ default: module.CommandPalette })));
 const Incidents = lazy(() => import('./pages/ops/Incidents').then((module) => ({ default: module.Incidents })));
 const Messages = lazy(() => import('./pages/ops/Messages').then((module) => ({ default: module.Messages })));
 const Corrections = lazy(() => import('./pages/corrections').then((module) => ({ default: module.Corrections })));
@@ -49,19 +48,14 @@ const AuthBootstrap = ({ children }: { children: React.ReactNode }) => {
     let cancelled = false;
 
     const bootstrap = async () => {
-      console.log('[AuthBootstrap] Starting - isAuthenticated:', isAuthenticated);
-      
       if (isAuthenticated) {
-        console.log('[AuthBootstrap] User already authenticated, skipping fetch');
         if (!cancelled) setReady(true);
         return;
       }
 
       try {
-        console.log('[AuthBootstrap] Fetching current admin session...');
         const admin = await api.get<AdminSessionUser>('/v1/admin/auth/me');
         if (!cancelled) {
-          console.log('[AuthBootstrap] Session valid, logging in:', admin);
           login(admin);
           setDegraded(false);
         }
@@ -70,13 +64,9 @@ const AuthBootstrap = ({ children }: { children: React.ReactNode }) => {
           return;
         }
 
-        console.error('[AuthBootstrap] Session fetch failed:', err);
-        
         if (isAuthError(err)) {
-          console.log('[AuthBootstrap] Auth error detected, clearing session');
           logout();
         } else {
-          console.warn('[AuthBootstrap] Non-auth error, marking as degraded');
           setDegraded(true);
         }
       } finally {
@@ -151,12 +141,6 @@ const AppRoutes = () => {
   const defaultLiveOpsRoute = '/ops/dashboard';
   const defaultDataConsoleRoute = getDefaultRoute(capabilities, 'data-console');
 
-  console.log('[AppRoutes] Initial render:', {
-    isAuthenticated,
-    defaultDataConsoleRoute,
-    capabilities: JSON.stringify(capabilities),
-  });
-
   return (
     <>
       <Suspense fallback={<RouteFallback />}>
@@ -168,9 +152,10 @@ const AppRoutes = () => {
 
           <Route element={
             <RequireAdminSession>
-              <LiveOpsShell />
+              <CommandShell />
             </RequireAdminSession>
           }>
+            <Route path="/" element={<Navigate to={defaultDataConsoleRoute} replace />} />
             <Route path="/ops" element={<Navigate to={defaultLiveOpsRoute} replace />} />
             <Route path="/ops/dashboard" element={
               <RequireCapability capability="canViewDashboard">
@@ -180,6 +165,11 @@ const AppRoutes = () => {
             <Route path="/ops/fleet" element={
               <RequireCapability capability="canViewFleetMap">
                 <FleetMap />
+              </RequireCapability>
+            } />
+            <Route path="/ops/trips" element={
+              <RequireCapability capability="canViewTripDetail">
+                <TripsList />
               </RequireCapability>
             } />
             <Route path="/ops/trips/:id" element={
@@ -212,15 +202,6 @@ const AppRoutes = () => {
                 <AuditLog />
               </RequireCapability>
             } />
-            <Route path="/ops/*" element={<Navigate to={defaultLiveOpsRoute} replace />} />
-          </Route>
-
-          <Route element={
-            <RequireAdminSession>
-              <AdminDataShell />
-            </RequireAdminSession>
-          }>
-            <Route path="/" element={<Navigate to={defaultDataConsoleRoute} replace />} />
             <Route path="/corrections" element={
               <RequireCapability capability="canReviewCorrections">
                 <Corrections />
@@ -261,13 +242,12 @@ const AppRoutes = () => {
                 <AdminUsers />
               </RequireCapability>
             } />
+            <Route path="/ops/*" element={<Navigate to={defaultLiveOpsRoute} replace />} />
             <Route path="*" element={<Navigate to={defaultDataConsoleRoute} replace />} />
           </Route>
 
           <Route path="*" element={<Navigate to={isAuthenticated ? defaultDataConsoleRoute : '/login'} replace />} />
         </Routes>
-
-        {isAuthenticated && <CommandPalette />}
       </Suspense>
     </>
   );

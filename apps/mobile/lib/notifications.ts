@@ -1,10 +1,9 @@
 import * as Notifications from 'expo-notifications';
+import { getMessaging } from '@react-native-firebase/messaging';
 import { Platform } from 'react-native';
 import { PUSH_TOKEN_PROVIDER } from 'shared';
 import { api } from './api.client';
-import { config, features } from './config';
-
-let pushTokenListener: { remove: () => void } | null = null;
+import { features } from './config';
 
 // Configure how notifications display when app is in foreground.
 Notifications.setNotificationHandler({
@@ -18,58 +17,67 @@ Notifications.setNotificationHandler({
 async function registerPushToken(pushToken: string): Promise<void> {
   await api.patch('/v1/users/fcm-token', {
     pushToken,
-    pushTokenProvider: PUSH_TOKEN_PROVIDER.EXPO,
+    pushTokenProvider: PUSH_TOKEN_PROVIDER.FCM,
   }).catch(() => {
-    console.warn('[Notifications] Failed to register push token with backend');
+    console.warn('[Notifications] Failed to register FCM token with backend');
   });
 }
 
+// Permission + listener setup runs once per app process.
+// Token registration still happens on every call (handles re-login / user switch).
+let messagingSetupDone = false;
+let tokenRefreshUnsub: (() => void) | null = null;
+
 /**
- * Request permissions + register push token with backend.
- * Called on every app launch to keep token fresh.
+ * Request permissions + register FCM token with backend.
+ * Called on every user session to keep the backend token fresh.
+ * Permission request and token-refresh listener are wired only once.
+ *
+ * Requires native google-services.json / GoogleService-Info.plist —
+ * @react-native-firebase/messaging is a native module and cannot be
+ * initialised purely from a JS config object.
  */
 export async function setupNotifications(): Promise<string | null> {
   try {
-    if (!features.pushNotifications || !config.projectId) {
-      console.warn('[Notifications] Push notifications disabled by configuration');
+    if (!features.pushNotifications) {
       return null;
     }
 
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let finalStatus = existing;
+    const messaging = getMessaging();
 
-    if (existing !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
+    if (!messagingSetupDone) {
+      const authStatus = await messaging.requestPermission();
+      const enabled =
+        authStatus === 1 || // AUTHORIZED
+        authStatus === 2;   // PROVISIONAL
 
-    if (finalStatus !== 'granted') {
-      console.log('[Notifications] Permission not granted');
-      return null;
-    }
+      if (!enabled) {
+        console.log('[Notifications] Permission not granted');
+        return null;
+      }
 
-    // Android needs a notification channel.
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'Default',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#1E3A8A',
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('default', {
+          name: 'Default',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#356C8F',
+        });
+      }
+
+      // Clean up any stale listener before registering a fresh one.
+      tokenRefreshUnsub?.();
+      tokenRefreshUnsub = messaging.onTokenRefresh((newToken) => {
+        void registerPushToken(newToken);
       });
+
+      messagingSetupDone = true;
     }
 
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId: config.projectId });
-    const token = tokenData.data;
-
-    await registerPushToken(token);
-
-    if (pushTokenListener) {
-      pushTokenListener.remove();
+    const token = await messaging.getToken();
+    if (token) {
+      await registerPushToken(token);
     }
-
-    pushTokenListener = Notifications.addPushTokenListener(({ data }) => {
-      void registerPushToken(data);
-    });
 
     return token;
   } catch (error) {

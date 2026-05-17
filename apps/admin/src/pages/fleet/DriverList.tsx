@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminDriverListItem } from 'shared';
+import { KPIBlock, SectionCard, StateBadge } from '../../components/design/primitives';
+import { Icon } from '../../components/design/Icon';
 import { api } from '../../lib/api.client';
 import { extractApiError } from '../../lib/api-error';
-import { Plus, Save, Trash2, UserRound } from 'lucide-react';
 
 type DriverFormState = {
   name: string;
@@ -17,11 +18,13 @@ const emptyForm: DriverFormState = {
   licenseNumber: '',
 };
 
-const panelStyle: React.CSSProperties = {
-  backgroundColor: 'white',
-  border: '1px solid #E5E7EB',
-  borderRadius: '0.75rem',
-  overflow: 'hidden',
+const fieldStyle: React.CSSProperties = {
+  width: '100%',
+  borderRadius: 12,
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
+  padding: '10px 12px',
+  outline: 'none',
 };
 
 export const DriverList: React.FC = () => {
@@ -55,7 +58,7 @@ export const DriverList: React.FC = () => {
     setSaveSuccess(false);
   }, [selectedDriver]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!saveSuccess) {
       return;
     }
@@ -101,127 +104,146 @@ export const DriverList: React.FC = () => {
     },
   });
 
+  const activeCount = drivers.filter((driver) => driver.isActive).length;
+  const licensedCount = drivers.filter((driver) => Boolean(driver.licenseNumber)).length;
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.35fr) 360px', gap: '1rem', height: '100%' }}>
-      <div style={{ ...panelStyle, display: 'flex', flexDirection: 'column' }}>
-        {driversError && (
-          <div style={{ margin: '1rem 1rem 0', padding: '0.85rem 0.95rem', borderRadius: '0.75rem', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
-            {extractApiError(driversError).message}
+    <div style={{ display: 'grid', gap: 16, minHeight: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 16,
+          alignItems: 'flex-start',
+          padding: 20,
+          border: '1px solid var(--border)',
+          borderRadius: 20,
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,245,242,0.9))',
+        }}
+      >
+        <div>
+          <div className="mono" style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>
+            Fleet Registry
           </div>
-        )}
-
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 'bold' }}>Driver Management</h1>
-            <p style={{ margin: '0.25rem 0 0', color: '#6B7280', fontSize: '0.875rem' }}>{drivers.length} drivers registered</p>
+          <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 500, letterSpacing: '-0.03em' }}>
+            Drivers
+          </h1>
+          <div style={{ marginTop: 6, color: 'var(--muted)', maxWidth: 720 }}>
+            Driver identity, phone, and license records continue to use the current driver management contract.
           </div>
-          <button
-            type="button"
-            onClick={() => setSelectedDriverId(null)}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', border: 'none', borderRadius: '0.5rem', background: '#2563EB', color: 'white', padding: '0.7rem 0.95rem', cursor: 'pointer', fontWeight: 700 }}
-          >
-            <Plus size={16} /> New Driver
-          </button>
         </div>
-
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead style={{ position: 'sticky', top: 0, backgroundColor: '#F9FAFB', zIndex: 1 }}>
-              <tr>
-                <th style={{ padding: '1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600 }}>Name</th>
-                <th style={{ padding: '1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600 }}>Phone</th>
-                <th style={{ padding: '1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600 }}>License</th>
-                <th style={{ padding: '1rem', borderBottom: '1px solid #E5E7EB', fontWeight: 600 }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={4} style={{ padding: '2rem', textAlign: 'center' }}>Loading...</td></tr>
-              ) : drivers.map((driver) => (
-                <tr
-                  key={driver.id}
-                  onClick={() => setSelectedDriverId(driver.id)}
-                  style={{ borderBottom: '1px solid #E5E7EB', cursor: 'pointer', background: selectedDriverId === driver.id ? '#EFF6FF' : 'white' }}
-                >
-                  <td style={{ padding: '1rem', fontWeight: 600 }}>{driver.name}</td>
-                  <td style={{ padding: '1rem', color: '#4B5563' }}>{driver.phone}</td>
-                  <td style={{ padding: '1rem', color: '#4B5563' }}>{driver.licenseNumber || '-'}</td>
-                  <td style={{ padding: '1rem' }}>
-                    <span style={{ padding: '0.25rem 0.75rem', borderRadius: '9999px', fontSize: '0.75rem', fontWeight: 600, background: driver.isActive ? '#ECFDF5' : '#FEF2F2', color: driver.isActive ? '#059669' : '#DC2626' }}>
-                      {driver.isActive ? 'Active' : 'Deactivated'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <button
+          type="button"
+          onClick={() => setSelectedDriverId(null)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '10px 16px', fontSize: 12, fontWeight: 500 }}
+        >
+          <Icon name="plus" size={12} />
+          New Driver
+        </button>
       </div>
 
-      <div style={{ ...panelStyle, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '1.25rem 1.25rem 1rem', borderBottom: '1px solid #E5E7EB' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
-            <UserRound size={18} color="#2563EB" />
-            <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>{selectedDriver ? 'Edit Driver' : 'Create Driver'}</h2>
-          </div>
-          <div style={{ color: '#6B7280', fontSize: '0.85rem' }}>
-            {selectedDriver ? 'Update driver identity and contact details.' : 'Register a new driver account.'}
-          </div>
+      {driversError ? (
+        <div style={{ padding: '12px 14px', borderRadius: 16, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
+          {extractApiError(driversError).message}
         </div>
+      ) : null}
 
-        <div style={{ padding: '1.25rem', display: 'grid', gap: '0.9rem' }}>
-          <label style={{ display: 'grid', gap: '0.4rem' }}>
-            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#374151' }}>Name</span>
-            <input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} style={{ padding: '0.7rem 0.8rem', borderRadius: '0.5rem', border: '1px solid #D1D5DB' }} />
-          </label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+        <KPIBlock label="Drivers" value={drivers.length} sub="All driver records" spark={[1, 2, 2, 3, Math.max(drivers.length, 1)]} />
+        <KPIBlock label="Active" value={activeCount} sub="Available to operate" accent="var(--ok)" spark={[1, 1, 2, 2, Math.max(activeCount, 1)]} />
+        <KPIBlock label="Licensed" value={licensedCount} sub="License number present" accent="var(--info)" spark={[1, 2, 2, 2, Math.max(licensedCount, 1)]} />
+        <KPIBlock label="No License" value={Math.max(drivers.length - licensedCount, 0)} sub="Needs cleanup or onboarding" accent="var(--warn)" spark={[1, 1, 1, 2, Math.max(drivers.length - licensedCount, 1)]} />
+      </div>
 
-          <label style={{ display: 'grid', gap: '0.4rem' }}>
-            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#374151' }}>Phone</span>
-            <input value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} style={{ padding: '0.7rem 0.8rem', borderRadius: '0.5rem', border: '1px solid #D1D5DB' }} />
-          </label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.45fr) 360px', gap: 16 }}>
+        <SectionCard title="Driver Manifest" subtitle={isLoading ? 'Loading drivers' : `${drivers.length} driver records`}>
+          <div className="scroll" style={{ border: '1px solid var(--border)', borderRadius: 16, maxHeight: 'calc(100vh - 410px)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)' }}>
+                <tr>
+                  {['Name', 'Phone', 'License', 'Status'].map((label) => (
+                    <th key={label} style={{ padding: '12px 14px', textAlign: 'left', fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid var(--divider)' }}>
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <tr><td colSpan={4} style={{ padding: '32px 14px', textAlign: 'center', color: 'var(--muted)' }}>Loading drivers…</td></tr>
+                ) : drivers.map((driver) => {
+                  const active = selectedDriverId === driver.id;
+                  return (
+                    <tr key={driver.id} onClick={() => setSelectedDriverId(driver.id)} style={{ background: active ? 'var(--surface-2)' : 'transparent', cursor: 'pointer' }}>
+                      <td style={{ padding: '14px', borderBottom: '1px solid var(--divider)' }}>
+                        <div style={{ fontWeight: 500 }}>{driver.name}</div>
+                      </td>
+                      <td style={{ padding: '14px', borderBottom: '1px solid var(--divider)' }}>{driver.phone}</td>
+                      <td className="mono" style={{ padding: '14px', borderBottom: '1px solid var(--divider)' }}>{driver.licenseNumber || '—'}</td>
+                      <td style={{ padding: '14px', borderBottom: '1px solid var(--divider)' }}>
+                        <StateBadge state={driver.isActive ? 'LIVE' : 'OFFLINE'} label={driver.isActive ? 'Active' : 'Deactivated'} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
 
-          <label style={{ display: 'grid', gap: '0.4rem' }}>
-            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#374151' }}>License Number</span>
-            <input value={form.licenseNumber} onChange={(event) => setForm((current) => ({ ...current, licenseNumber: event.target.value }))} style={{ padding: '0.7rem 0.8rem', borderRadius: '0.5rem', border: '1px solid #D1D5DB' }} />
-          </label>
+        <SectionCard title={selectedDriver ? 'Driver Detail' : 'Create Driver'} subtitle={selectedDriver ? 'Update driver identity and contact data' : 'Register a new driver'}>
+          <div style={{ display: 'grid', gap: 12 }}>
+            <label style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Name</span>
+              <input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} style={fieldStyle} />
+            </label>
+            <label style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Phone</span>
+              <input value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} style={fieldStyle} />
+            </label>
+            <label style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>License Number</span>
+              <input value={form.licenseNumber} onChange={(event) => setForm((current) => ({ ...current, licenseNumber: event.target.value }))} style={fieldStyle} />
+            </label>
 
-          {selectedDriver && (
-            <div style={{ padding: '0.9rem', borderRadius: '0.75rem', background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-              <div style={{ fontSize: '0.78rem', color: '#64748B', textTransform: 'uppercase' }}>Driver record</div>
-              <div style={{ marginTop: '0.35rem', fontWeight: 700 }}>{selectedDriver.name}</div>
-              <div style={{ marginTop: '0.2rem', color: '#475569', fontSize: '0.88rem' }}>{selectedDriver.phone}</div>
-            </div>
-          )}
+            {selectedDriver ? (
+              <div style={{ padding: 12, borderRadius: 14, background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>DRIVER RECORD</div>
+                <div style={{ marginTop: 8 }}>{selectedDriver.name}</div>
+                <div style={{ marginTop: 2, color: 'var(--muted)' }}>{selectedDriver.phone}</div>
+              </div>
+            ) : null}
 
-          {formError && (
-            <div style={{ padding: '0.85rem 0.95rem', borderRadius: '0.75rem', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
-              {formError}
-            </div>
-          )}
+            {formError ? (
+              <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
+                {formError}
+              </div>
+            ) : null}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
               type="button"
               onClick={() => saveMutation.mutate()}
               disabled={saveMutation.isPending || !form.name.trim() || !form.phone.trim()}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '0.75rem', background: '#111827', color: 'white', padding: '0.85rem 1rem', fontWeight: 700, cursor: 'pointer' }}
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, border: '1px solid var(--ink)', background: 'var(--ink)', color: 'var(--accent-ink)', padding: '11px 16px', fontWeight: 500 }}
             >
-              <Save size={16} /> {saveMutation.isPending ? 'Saving...' : selectedDriver ? 'Save Changes' : 'Create Driver'}
+              <Icon name="check" size={12} />
+              {saveMutation.isPending ? 'Saving…' : selectedDriver ? 'Save Changes' : 'Create Driver'}
             </button>
-            {saveSuccess && <span style={{ color: '#34D399', fontSize: '0.875rem', fontWeight: 600 }}>Saved</span>}
-          </div>
+            {saveSuccess ? <div style={{ color: 'var(--ok)', fontSize: 12 }}>Saved</div> : null}
 
-          {selectedDriver?.isActive && (
-            <button
-              type="button"
-              onClick={() => deactivateMutation.mutate(selectedDriver.id)}
-              disabled={deactivateMutation.isPending}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: '1px solid #FCA5A5', borderRadius: '0.75rem', background: '#FFF1F2', color: '#BE123C', padding: '0.85rem 1rem', fontWeight: 700, cursor: 'pointer' }}
-            >
-              <Trash2 size={16} /> Deactivate Driver
-            </button>
-          )}
-        </div>
+            {selectedDriver?.isActive ? (
+              <button
+                type="button"
+                onClick={() => deactivateMutation.mutate(selectedDriver.id)}
+                disabled={deactivateMutation.isPending}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)', padding: '11px 16px', fontWeight: 500 }}
+              >
+                <Icon name="x" size={12} />
+                Deactivate Driver
+              </button>
+            ) : null}
+          </div>
+        </SectionCard>
       </div>
     </div>
   );

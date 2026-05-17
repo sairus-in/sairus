@@ -161,9 +161,11 @@ export async function attendanceRoutes(app: FastifyInstance) {
   app.post('/correction-request', {
     preHandler: mobileRoute(['STUDENT']),
   }, async (request, reply) => {
-    throw new AppError(410, 'ENDPOINT_DEPRECATED', {
-      details: [{ message: 'Use POST /v1/attendance/corrections instead' }],
-    });
+    return reply.code(410).send(ok({
+      error: 'ENDPOINT_DEPRECATED',
+      message: 'Use POST /v1/attendance/corrections instead.',
+      canonical: '/v1/attendance/corrections',
+    }, request.id));
   });
 
   app.post('/corrections', {
@@ -244,7 +246,7 @@ export async function attendanceRoutes(app: FastifyInstance) {
     return reply.send(okList(corrections, buildPagination(1, 100, corrections.length), request.id));
   });
 
-  // COORDINATOR: Review a correction request
+  // COORDINATOR: Review a correction request — legacy compatibility shim.
   app.post('/corrections/:correctionId/review', {
     preHandler: adminRoute(['COORDINATOR', 'TRANSPORT_OFFICER']),
   }, async (request, reply) => {
@@ -260,6 +262,9 @@ export async function attendanceRoutes(app: FastifyInstance) {
       parsed.data.status,
       parsed.data.reviewNote,
     );
+
+    reply.header('Deprecation', 'true');
+    reply.header('Link', `</v1/admin/corrections/${params.data.correctionId}>; rel="successor-version"`);
     return reply.send(ok(result, request.id));
   });
 

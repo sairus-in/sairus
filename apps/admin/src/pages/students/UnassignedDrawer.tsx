@@ -4,6 +4,15 @@ import { AdminListResponse, AdminRouteSummary, AdminStudentListItem } from 'shar
 import { api } from '../../lib/api.client';
 import { extractApiError } from '../../lib/api-error';
 
+const fieldStyle: React.CSSProperties = {
+  width: '100%',
+  borderRadius: 12,
+  border: '1px solid var(--border)',
+  background: 'var(--surface)',
+  padding: '10px 12px',
+  outline: 'none',
+};
+
 export const UnassignedDrawer: React.FC = () => {
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -71,104 +80,94 @@ export const UnassignedDrawer: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '1.5rem', borderBottom: '1px solid #E5E7EB', backgroundColor: '#FEF2F2' }}>
-        <h2 style={{ fontSize: '1.125rem', fontWeight: 'bold', margin: 0, color: '#991B1B' }}>
-          Unassigned Sync Queue
-        </h2>
-        <p style={{ margin: '0.5rem 0 0', fontSize: '0.875rem', color: '#B91C1C' }}>
-          {unassigned.length} students require routing
-        </p>
+    <div style={{ display: 'grid', gap: 12, height: '100%', padding: 16, border: '1px solid var(--border)', borderRadius: 20, background: 'var(--surface)' }}>
+      <div>
+        <div className="mono" style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Routing Queue</div>
+        <h3 style={{ margin: '8px 0 0', fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 500 }}>Unassigned Students</h3>
+        <div style={{ marginTop: 4, color: 'var(--muted)' }}>{unassigned.length} students require route placement</div>
       </div>
 
-      <div style={{ padding: '1rem', borderBottom: '1px solid #E5E7EB', display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: '#F9FAFB' }}>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <select
-            value={targetRouteId}
-            onChange={(event) => {
-              setTargetRouteId(event.target.value);
-              setTargetStopId('');
-              setFeedback(null);
-              setErrorMessage(null);
-            }}
-            style={{ flex: 1, padding: '0.5rem', border: '1px solid #D1D5DB', borderRadius: '4px' }}
-          >
-            <option value="">-- Select Route --</option>
-            {routes.map((route) => (
-              <option key={route.id} value={route.id}>{route.name}</option>
-            ))}
-          </select>
-          <select
-            value={targetStopId}
-            onChange={(event) => {
-              setTargetStopId(event.target.value);
-              setFeedback(null);
-              setErrorMessage(null);
-            }}
-            style={{ flex: 1, padding: '0.5rem', border: '1px solid #D1D5DB', borderRadius: '4px' }}
-          >
-            <option value="">-- Select Stop --</option>
-            {stops.map((routeStop) => (
-              <option key={routeStop.stop.id} value={routeStop.stop.id}>{routeStop.stop.name}</option>
-            ))}
-          </select>
-        </div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        <select
+          value={targetRouteId}
+          onChange={(event) => {
+            setTargetRouteId(event.target.value);
+            setTargetStopId('');
+            setFeedback(null);
+            setErrorMessage(null);
+          }}
+          style={fieldStyle}
+        >
+          <option value="">Select Route</option>
+          {routes.map((route) => (
+            <option key={route.id} value={route.id}>{route.name}</option>
+          ))}
+        </select>
+        <select
+          value={targetStopId}
+          onChange={(event) => {
+            setTargetStopId(event.target.value);
+            setFeedback(null);
+            setErrorMessage(null);
+          }}
+          style={fieldStyle}
+        >
+          <option value="">Select Stop</option>
+          {stops.map((routeStop) => (
+            <option key={routeStop.stop.id} value={routeStop.stop.id}>{routeStop.stop.name}</option>
+          ))}
+        </select>
         <button
+          type="button"
           onClick={handleAssign}
           disabled={assignMutation.isPending || selectedIds.size === 0}
-          style={{ width: '100%', padding: '0.75rem', backgroundColor: selectedIds.size > 0 ? '#2563EB' : '#9CA3AF', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: selectedIds.size > 0 ? 'pointer' : 'not-allowed' }}
+          style={{ borderRadius: 999, border: '1px solid var(--ink)', background: selectedIds.size > 0 ? 'var(--ink)' : 'var(--surface-2)', color: selectedIds.size > 0 ? 'var(--accent-ink)' : 'var(--muted)', padding: '11px 16px', fontWeight: 500 }}
         >
-          {assignMutation.isPending ? 'Assigning...' : `Assign ${selectedIds.size} Students`}
+          {assignMutation.isPending ? 'Assigning…' : `Assign ${selectedIds.size} Students`}
         </button>
-        {feedback && (
-          <div style={{ padding: '0.7rem 0.8rem', borderRadius: '6px', background: '#ECFDF5', color: '#047857', fontSize: '0.85rem', border: '1px solid #A7F3D0' }}>
+        {feedback ? (
+          <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--ok)', background: 'var(--ok-soft)', color: 'var(--ok)' }}>
             {feedback}
           </div>
-        )}
-        {errorMessage && (
-          <div style={{ padding: '0.7rem 0.8rem', borderRadius: '6px', background: '#FEF2F2', color: '#B91C1C', fontSize: '0.85rem', border: '1px solid #FECACA' }}>
+        ) : null}
+        {errorMessage ? (
+          <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
             {errorMessage}
           </div>
-        )}
+        ) : null}
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '1rem' }}>
+      <div className="scroll" style={{ display: 'grid', gap: 8, minHeight: 0, paddingRight: 4 }}>
         {isLoading ? (
-          <div style={{ color: '#6B7280', textAlign: 'center', marginTop: '2rem' }}>Loading unassigned...</div>
+          <div style={{ padding: '24px 0', color: 'var(--muted)', textAlign: 'center' }}>Loading unassigned students…</div>
         ) : unassigned.length === 0 ? (
-          <div style={{ color: '#10B981', textAlign: 'center', marginTop: '2rem', fontWeight: 500 }}>All students are assigned.</div>
+          <div style={{ padding: '24px 0', color: 'var(--ok)', textAlign: 'center' }}>All students are assigned.</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {unassigned.map((student) => (
-              <div
-                key={student.id}
-                onClick={() => toggleSelect(student.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '1rem',
-                  border: `2px solid ${selectedIds.has(student.id) ? '#3B82F6' : '#E5E7EB'}`,
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  backgroundColor: selectedIds.has(student.id) ? '#EFF6FF' : 'white',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(student.id)}
-                  readOnly
-                  style={{ width: '1.25rem', height: '1.25rem' }}
-                />
-                <div>
-                  <div style={{ fontWeight: 600 }}>{student.name}</div>
-                  <div style={{ fontSize: '0.875rem', color: '#6B7280' }}>
-                    {student.rollNumber || 'No roll'} | {student.department || 'No department'}
-                  </div>
+          unassigned.map((student) => (
+            <button
+              key={student.id}
+              type="button"
+              onClick={() => toggleSelect(student.id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: 12,
+                borderRadius: 16,
+                border: `1px solid ${selectedIds.has(student.id) ? 'var(--ink)' : 'var(--border)'}`,
+                background: selectedIds.has(student.id) ? 'var(--surface-2)' : 'var(--surface)',
+                textAlign: 'left',
+              }}
+            >
+              <input type="checkbox" checked={selectedIds.has(student.id)} readOnly />
+              <div>
+                <div style={{ fontWeight: 500 }}>{student.name}</div>
+                <div style={{ marginTop: 2, color: 'var(--muted)', fontSize: 12 }}>
+                  {student.rollNumber || 'No roll'} · {student.department || 'No department'}
                 </div>
               </div>
-            ))}
-          </div>
+            </button>
+          ))
         )}
       </div>
     </div>

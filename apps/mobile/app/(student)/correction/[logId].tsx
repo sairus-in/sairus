@@ -11,11 +11,29 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { colors, radii, spacing, typography } from '../../../constants/theme';
+import { typography } from '../../../constants/theme';
 import { ListLoadingSkeleton } from '../../../components/shared/LoadingState';
 import { ScreenErrorState } from '../../../components/shared/ScreenErrorState';
 import { t } from '../../../i18n';
 import { studentService } from '../../../services/student.service';
+
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  ghost: '#C9C9C9',
+  border: '#E9E9E9',
+  card: '#356C8F',
+  cardText: '#FFFFFF',
+  cardMuted: 'rgba(255, 255, 255, 0.7)',
+  inputBg: '#FFFFFF',
+  evidenceBg: '#FEF3C7',
+  evidenceText: '#78350F',
+  errorText: '#991B1B',
+  btnBg: '#356C8F',
+  btnText: '#FFFFFF',
+  link: '#356C8F',
+};
 
 export default function CorrectionScreen() {
   const router = useRouter();
@@ -45,9 +63,9 @@ export default function CorrectionScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>{t('correction.title')}</Text>
+      <SafeAreaView style={s.container}>
+        <View style={s.headerBlock}>
+          <Text style={s.title}>{t('correction.title')}</Text>
         </View>
         <ListLoadingSkeleton rows={4} />
       </SafeAreaView>
@@ -65,27 +83,29 @@ export default function CorrectionScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backBtn}>Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>{t('correction.title')}</Text>
-      </View>
+    <SafeAreaView style={s.container}>
+      <View style={s.layout}>
 
-      <View style={styles.content}>
+        {/* Header */}
+        <View style={s.headerBlock}>
+          <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7}>
+            <Text style={s.back}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={s.title}>{t('correction.title')}</Text>
+        </View>
+
+        {/* Attendance log — dark card */}
         {logData ? (
-          <View style={styles.incidentCard}>
-            <Text style={styles.incidentDate}>{logData.date}</Text>
-            <Text style={styles.incidentMeta}>
-              Bus {logData.busNumber} - {logData.tripType}
-            </Text>
+          <View style={s.logCard}>
+            <Text style={s.logDate}>{logData.date}</Text>
+            <Text style={s.logMeta}>Bus {logData.busNumber} · {logData.tripType}</Text>
           </View>
         ) : null}
 
+        {/* GPS evidence — amber tint, no border */}
         {typeof logData?.distanceToBus === 'number' ? (
-          <View style={styles.evidenceCard}>
-            <Text style={styles.evidenceText}>
+          <View style={s.evidenceCard}>
+            <Text style={s.evidenceText}>
               {t('correction.gpsEvidence', {
                 busDist: String(logData.distanceToBus || 0),
                 stopDist: String(logData.distanceToStop || 0),
@@ -94,150 +114,166 @@ export default function CorrectionScreen() {
           </View>
         ) : null}
 
+        {/* Reason input */}
         <TextInput
-          style={styles.input}
+          style={s.input}
           placeholder={t('correction.reasonPlaceholder')}
-          placeholderTextColor={colors.text.muted}
+          placeholderTextColor={C.ghost}
           value={reason}
           onChangeText={setReason}
           multiline
           numberOfLines={4}
           textAlignVertical="top"
+          accessibilityLabel="Correction reason"
+          accessibilityHint="Describe why you believe your attendance should be corrected"
         />
 
+        {/* Validation hint */}
         {reason.length > 0 && reason.length < 10 ? (
-          <Text style={styles.hint}>{t('correction.minChars')}</Text>
+          <Text style={s.hint}>{t('correction.minChars')}</Text>
         ) : null}
 
+        {/* Mutation error */}
         {mutation.error ? (
-          <Text style={styles.errorText}>
+          <Text style={s.errorText}>
             {mutation.error instanceof Error ? mutation.error.message : 'Unable to submit correction right now.'}
           </Text>
         ) : null}
 
+        {/* Submit */}
         <TouchableOpacity
-          style={[styles.submitBtn, !isValid && styles.submitDisabled]}
+          style={[s.btn, (!isValid || mutation.isPending) && s.btnDisabled]}
           onPress={() => mutation.mutate()}
           disabled={!isValid || mutation.isPending}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={t('correction.submit')}
+          accessibilityState={{ disabled: !isValid || mutation.isPending, busy: mutation.isPending }}
         >
-          {mutation.isPending ? (
-            <ActivityIndicator color={colors.white} />
-          ) : (
-            <Text style={styles.submitText}>{t('correction.submit')}</Text>
-          )}
+          {mutation.isPending
+            ? <ActivityIndicator color={C.btnText} />
+            : <Text style={s.btnLabel}>{t('correction.submit')}</Text>
+          }
         </TouchableOpacity>
 
-        <Text style={styles.reviewNote}>{t('correction.reviewNote')}</Text>
+        <Text style={s.reviewNote}>{t('correction.reviewNote')}</Text>
+
       </View>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: C.bg,
   },
-  header: {
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
+  layout: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 40,
+    gap: 16,
   },
-  backBtn: {
+
+  // Header
+  headerBlock: {
+    gap: 10,
+  },
+  back: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    color: colors.brand.primary,
-    marginBottom: spacing.xs,
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.link,
   },
   title: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.h1,
-    fontWeight: typography.weights.bold,
-    color: colors.text.primary,
+    fontSize: 26,
+    fontWeight: '700',
+    color: C.ink,
+    letterSpacing: -0.5,
   },
-  content: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
+
+  // Attendance log card — dark, no side-stripe
+  logCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 18,
+    gap: 4,
   },
-  incidentCard: {
-    backgroundColor: colors.card.bg,
-    borderWidth: 1,
-    borderColor: colors.card.border,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.brand.primary,
-    borderRadius: radii.sm,
-    padding: spacing.md,
-  },
-  incidentDate: {
+  logDate: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    fontWeight: typography.weights.medium,
-    color: colors.text.primary,
+    fontSize: 16,
+    fontWeight: '600',
+    color: C.cardText,
   },
-  incidentMeta: {
+  logMeta: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.small,
-    color: colors.text.muted,
-    marginTop: 2,
+    fontSize: 13,
+    color: C.cardMuted,
   },
+
+  // GPS evidence — amber tint, no border
   evidenceCard: {
-    backgroundColor: colors.warning.bg,
-    borderWidth: 1,
-    borderColor: colors.warning.border,
-    borderRadius: radii.sm,
-    padding: spacing.md,
-    marginTop: spacing.md,
+    backgroundColor: C.evidenceBg,
+    borderRadius: 12,
+    padding: 14,
   },
   evidenceText: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.small,
-    color: colors.warning.text,
+    fontSize: 13,
+    color: C.evidenceText,
+    lineHeight: 20,
   },
+
+  // Input
   input: {
-    backgroundColor: colors.card.bg,
-    borderWidth: 1,
-    borderColor: colors.card.border,
-    borderRadius: radii.input,
-    padding: spacing.md,
-    marginTop: spacing.md,
+    backgroundColor: C.inputBg,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    borderRadius: 14,
+    padding: 14,
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    color: colors.text.primary,
-    minHeight: 100,
+    fontSize: 15,
+    color: C.ink,
+    minHeight: 110,
   },
+
+  // Feedback
   hint: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.micro,
-    color: colors.text.muted,
-    marginTop: spacing.micro,
+    fontSize: 12,
+    color: C.ghost,
+    marginTop: -4,
   },
   errorText: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.small,
-    color: colors.error.text,
-    marginTop: spacing.sm,
+    fontSize: 13,
+    color: C.errorText,
   },
-  submitBtn: {
-    backgroundColor: colors.button.primary.bg,
-    paddingVertical: 15,
-    borderRadius: radii.button,
+
+  // Submit
+  btn: {
+    backgroundColor: C.btnBg,
+    height: 54,
+    borderRadius: 14,
     alignItems: 'center',
-    marginTop: spacing.lg,
+    justifyContent: 'center',
+    marginTop: 4,
   },
-  submitDisabled: {
-    opacity: 0.4,
+  btnDisabled: {
+    opacity: 0.35,
   },
-  submitText: {
+  btnLabel: {
     fontFamily: typography.family,
-    fontSize: 15,
-    fontWeight: typography.weights.semibold,
-    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
+    color: C.btnText,
   },
   reviewNote: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.micro,
-    color: colors.text.muted,
+    fontSize: 12,
+    color: C.ghost,
     textAlign: 'center',
-    marginTop: spacing.md,
   },
 });

@@ -1,5 +1,5 @@
 import { prisma } from '../../lib/prisma';
-import { Prisma, AttendanceStatus, CheckInMethod, AttendanceEventType } from '@prisma/client';
+import { Prisma, AttendanceStatus, CheckInMethod, AttendanceEventType, AttendanceLog, Trip } from '@prisma/client';
 import { BadRequestError } from '../../lib/errors';
 
 interface UpsertAttendanceLogData {
@@ -10,7 +10,7 @@ interface UpsertAttendanceLogData {
   date: string;
   dateKey: string;
   status: 'PRESENT' | 'LATE_BOARD' | 'ABSENT' | 'PENDING' | 'EXCUSED' | 'MANUAL';
-  method?: 'QR_SCAN' | 'MANUAL_ADMIN' | 'SYSTEM_AUTO';
+  method?: 'QR_SCAN' | 'MANUAL_DRIVER' | 'MANUAL_ADMIN' | 'SYSTEM_AUTO';
   checkedInAt?: Date;
   lat?: number;
   lon?: number;
@@ -42,6 +42,9 @@ interface CreateAttendanceEventData {
  * No business logic. Just data access. Maps Prisma errors to AppError.
  */
 export class AttendanceRepository {
+  private isBoardedStatus(status: string | null | undefined) {
+    return status === 'PRESENT' || status === 'LATE_BOARD' || status === 'MANUAL';
+  }
 
   // ============ CORE ATTENDANCE OPERATIONS ============
 
@@ -149,29 +152,62 @@ export class AttendanceRepository {
   }
 
   /**
-   * Update attendance log status and increment trip boarded count atomically
-   * Used in transaction during check-in
+   * Update attendance log status and increment trip boarded count atomically.
+   * Also used for driver manual mark — upserts log by userId+tripId if no logId provided.
+   *
+   * boardedCount is only incremented when transitioning FROM a non-boarded status
+   * (ABSENT, PENDING, EXCUSED) TO a boarded status (PRESENT, MANUAL). Repeated manual
+   * marks on the same student do not double-count.
    */
   async updateAttendanceLogWithTrip(
-    logId: string,
+    userId: string,
     tripId: string,
+    busId: string,
+    routeId: string,
+    date: string,
     status: string,
     data: Partial<UpsertAttendanceLogData>
-  ) {
+  ): Promise<[AttendanceLog, Trip?]> {
     try {
-      return await prisma.$transaction([
-        prisma.attendanceLog.update({
-          where: { id: logId },
-          data: {
+      return await prisma.$transaction(async (tx) => {
+        const existingLog = await tx.attendanceLog.findUnique({
+          where: { userId_tripId: { userId, tripId } },
+          select: { status: true },
+        });
+
+        const shouldIncrement = !this.isBoardedStatus(existingLog?.status) && this.isBoardedStatus(status);
+
+        const log = await tx.attendanceLog.upsert({
+          where: { userId_tripId: { userId, tripId } },
+          update: {
             status: status as any,
-            ...data
-          }
-        }),
-        prisma.trip.update({
-          where: { id: tripId },
-          data: { boardedCount: { increment: 1 } }
-        })
-      ]);
+            method: data.method ?? 'MANUAL_DRIVER',
+            checkedInAt: data.checkedInAt,
+            driverNote: data.driverNote ?? undefined,
+          },
+          create: {
+            userId,
+            tripId,
+            busId,
+            routeId,
+            date,
+            dateKey: date,
+            status: status as any,
+            method: data.method ?? 'MANUAL_DRIVER',
+            checkedInAt: data.checkedInAt,
+            driverNote: data.driverNote ?? undefined,
+          },
+        });
+
+        const trip = shouldIncrement
+          ? await tx.trip.update({
+              where: { id: tripId },
+              data: { boardedCount: { increment: 1 } },
+            })
+          : null;
+
+        return trip ? [log, trip] : [log];
+      });
     } catch (err: any) {
       if (err.code === 'P2025') {
         throw new BadRequestError('LOG_OR_TRIP_NOT_FOUND');
@@ -368,6 +404,7 @@ export class AttendanceRepository {
         requestedBy: { select: { name: true } },
       },
       orderBy: { createdAt: 'asc' },
+      take: 100,
     });
   }
 
@@ -392,7 +429,8 @@ export class AttendanceRepository {
           }
         }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      take: 100,
     });
   }
 
@@ -649,10 +687,17 @@ export class AttendanceRepository {
     geofenceData: any,
     previousStatus: string | null,
     overrodeTripSkip: boolean
-  ) {
+  ): Promise<[AttendanceLog, Trip?]> {
     try {
-      return await prisma.$transaction([
-        prisma.attendanceLog.upsert({
+      return await prisma.$transaction(async (tx) => {
+        const existingLog = await tx.attendanceLog.findUnique({
+          where: { userId_tripId: { userId, tripId } },
+          select: { status: true },
+        });
+
+        const shouldIncrement = !this.isBoardedStatus(existingLog?.status) && this.isBoardedStatus(status);
+
+        const log = await tx.attendanceLog.upsert({
           where: { userId_tripId: { userId, tripId } },
           update: {
             status,
@@ -681,12 +726,17 @@ export class AttendanceRepository {
             distanceToStop: geofenceData.distanceToStop,
             geofenceMethod: geofenceData.method,
           },
-        }),
-        prisma.trip.update({
-          where: { id: tripId },
-          data: { boardedCount: { increment: 1 } },
-        }),
-      ]);
+        });
+
+        const trip = shouldIncrement
+          ? await tx.trip.update({
+              where: { id: tripId },
+              data: { boardedCount: { increment: 1 } },
+            })
+          : null;
+
+        return trip ? [log, trip] : [log];
+      });
     } catch (err: any) {
       if (err.code === 'P2025') {
         throw new BadRequestError('LOG_OR_TRIP_NOT_FOUND');
@@ -821,6 +871,152 @@ export class AttendanceRepository {
 
   async countCorrections(userId: string) {
     return prisma.attendanceCorrection.count({ where: { requestedById: userId } });
+  }
+
+  async getScopedCorrectionOrThrow(correctionId: string) {
+    return prisma.attendanceCorrection.findUnique({
+      where: { id: correctionId },
+      include: {
+        attendance: {
+          select: {
+            id: true,
+            tripId: true,
+            routeId: true,
+            status: true,
+          },
+        },
+      },
+    });
+  }
+
+  async getPendingStudentCountMap(tripIds: string[]) {
+    if (tripIds.length === 0) {
+      return new Map<string, number>();
+    }
+    const rows = await prisma.attendanceLog.groupBy({
+      by: ['tripId'],
+      where: { tripId: { in: tripIds }, status: 'PENDING' },
+      _count: { tripId: true },
+    });
+    return new Map(rows.map((row) => [row.tripId, row._count.tripId]));
+  }
+
+  async getPendingOutageCorrectionCountMap(tripIds: string[]) {
+    if (tripIds.length === 0) {
+      return new Map<string, number>();
+    }
+    const rows = await prisma.attendanceCorrection.findMany({
+      where: {
+        status: 'PENDING',
+        metadata: { path: ['busGPSOffline'], equals: true },
+        attendance: { tripId: { in: tripIds } },
+      },
+      select: { attendance: { select: { tripId: true } } },
+    });
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const tripId = row.attendance.tripId;
+      counts.set(tripId, (counts.get(tripId) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  async countPendingCorrectionsForAdmin(routeIds: string[] | null) {
+    return prisma.attendanceCorrection.count({
+      where: {
+        status: 'PENDING',
+        ...(routeIds ? { attendance: { routeId: { in: routeIds } } } : {}),
+      },
+    });
+  }
+
+  async getGpsOutageCorrectionsForAdmin(routeIds: string[] | null, pagination?: { page: number; limit: number }) {
+    const where: any = {
+      status: 'PENDING',
+      metadata: { path: ['busGPSOffline'], equals: true },
+      ...(routeIds ? { attendance: { routeId: { in: routeIds } } } : {}),
+    };
+    const [corrections, total] = await Promise.all([
+      prisma.attendanceCorrection.findMany({
+        where,
+        include: {
+          requestedBy: { select: { id: true, name: true, rollNumber: true, department: true } },
+          attendance: { select: { id: true, trip: { select: { id: true, routeId: true, bus: { select: { number: true, plateNumber: true } } } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: pagination ? (pagination.page - 1) * pagination.limit : undefined,
+        take: pagination?.limit,
+      }),
+      prisma.attendanceCorrection.count({ where }),
+    ]);
+    return { corrections, total };
+  }
+
+  async getPendingCorrectionsForAdmin(routeIds: string[] | null, pagination?: { page: number; limit: number }) {
+    const where: any = {
+      status: 'PENDING',
+      ...(routeIds ? { attendance: { routeId: { in: routeIds } } } : {}),
+    };
+    const [corrections, total] = await Promise.all([
+      prisma.attendanceCorrection.findMany({
+        where,
+        include: {
+          attendance: { include: { user: { select: { name: true, rollNumber: true, department: true } }, trip: { select: { busId: true, routeId: true, date: true } } } },
+          requestedBy: { select: { name: true, role: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: pagination ? (pagination.page - 1) * pagination.limit : undefined,
+        take: pagination?.limit,
+      }),
+      prisma.attendanceCorrection.count({ where }),
+    ]);
+    return { corrections, total };
+  }
+
+  async resolveCorrectionForAdmin(correctionId: string, status: 'APPROVED' | 'REJECTED', reviewerId: string, correctionData: any) {
+    return prisma.$transaction(async (tx) => {
+      const res = await tx.attendanceCorrection.update({
+        where: { id: correctionId },
+        data: { status, reviewedById: reviewerId, reviewedAt: new Date() }
+      });
+      if (status === 'APPROVED') {
+        await tx.attendanceEvent.create({
+          data: {
+            attendanceId: correctionData.attendanceId,
+            type: 'MANUAL_CORRECTION',
+            method: 'MANUAL_ADMIN',
+            actorId: reviewerId,
+            previousStatus: correctionData.attendance.status,
+            newStatus: 'PRESENT',
+            metadata: { reason: correctionData.reason }
+          }
+        });
+        await tx.attendanceLog.update({
+          where: { id: correctionData.attendanceId },
+          data: { status: 'PRESENT' }
+        });
+      }
+      return res;
+    });
+  }
+
+  async getTripStudentsForAdmin(tripId: string, routeId: string) {
+    return prisma.attendanceLog.findMany({
+      where: { tripId, routeId },
+      include: { user: { select: { id: true, name: true, rollNumber: true, department: true } } },
+      orderBy: { user: { name: 'asc' } }
+    });
+  }
+
+  async getTripTimelineForAdmin(tripId: string, routeId: string) {
+    return prisma.attendanceEvent.findMany({
+      where: { attendance: { tripId, routeId } },
+      include: {
+        actor: { select: { name: true, role: true } },
+        attendance: { include: { user: { select: { name: true, rollNumber: true } } } }
+      },
+      orderBy: { timestamp: 'desc' }
+    });
   }
 }
 

@@ -11,11 +11,79 @@ import {
   StudentHomeTrip,
   StudentHomeAttendance,
   StudentScreenState,
+  RouteGeometry,
 } from 'shared';
 import { AppError } from '../../lib/errors';
+import { getDistanceMetres } from 'shared';
 
 const PRESENT_STATUSES = new Set(['PRESENT', 'LATE_BOARD', 'MANUAL']);
 const CACHE_TTL = 300; // 5 minutes
+const ROUTE_GEOMETRY_CACHE_TTL = 30; // 30 seconds
+
+/**
+ * Hydrate route geometry for a student's trip.
+ * Uses Redis cache (30s TTL) and derives "passed" stops via 200m proximity check.
+ */
+async function getRouteGeometry(
+  tripId: string,
+  routeId: string,
+  studentStopId: string,
+  busLat?: number,
+  busLon?: number,
+): Promise<RouteGeometry | null> {
+  const cacheKey = `trip:${tripId}:geometry`;
+
+  try {
+    // Try cache first
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
+    // Fetch route stops from DB
+    const routeStops = await studentRepository.getRouteStopsOrdered(routeId);
+    if (!routeStops || routeStops.length === 0) {
+      return null;
+    }
+
+    // Determine which stops have been passed
+    let lastVisitedSequence = 0;
+    if (busLat !== undefined && busLon !== undefined) {
+      // Use 200m proximity check to find last visited stop
+      for (const rs of routeStops) {
+        const dist = getDistanceMetres(busLat, busLon, rs.stop.lat, rs.stop.lon);
+        if (dist < 200) {
+          lastVisitedSequence = rs.sequence;
+        }
+      }
+    }
+
+    // Build geometry
+    const geometry: RouteGeometry = {
+      stops: routeStops.map(rs => ({
+        id: rs.stopId,
+        name: rs.stop.name,
+        lat: rs.stop.lat,
+        lon: rs.stop.lon,
+        sequence: rs.sequence,
+        passed: rs.sequence < lastVisitedSequence,
+        isMyStop: rs.stopId === studentStopId,
+      })),
+      polyline: routeStops.map(rs => [rs.stop.lat, rs.stop.lon] as [number, number]),
+    };
+
+    // Cache it
+    await redis.setex(cacheKey, ROUTE_GEOMETRY_CACHE_TTL, JSON.stringify(geometry));
+    return geometry;
+  } catch (error) {
+    logger.warn({
+      event: 'route_geometry_error',
+      source: 'STUDENT',
+      meta: { tripId, routeId, error: String(error) },
+    });
+    return null;
+  }
+}
 
 function deriveStudentScreenState(input: {
   trip: StudentHomeTrip | null;
@@ -55,6 +123,7 @@ function deriveStudentScreenState(input: {
       busId: trip.busId,
       canCheckIn: trip.canCheckIn,
       busEta: null,
+      distanceRemainingM: null,
     };
   }
 
@@ -116,6 +185,7 @@ function buildEmptyHome(user: {
         yesterdayDate: null,
         substituteAssigned: false,
       },
+      routeGeometry: null,
     },
     features: {
       hasAssignment: false,
@@ -287,6 +357,27 @@ export const studentHomeService = {
 
     const resolvedAt = new Date().toISOString();
 
+    // Hydrate route geometry for active/upcoming trips
+    let routeGeometry: Awaited<ReturnType<typeof getRouteGeometry>> = null;
+    if (trip && assignment.routeId && assignment.stopId && (trip.status === 'ACTIVE' || trip.status === 'SCHEDULED')) {
+      // Get current bus position from Redis for proximity check
+      let busLat: number | undefined;
+      let busLon: number | undefined;
+      if (busId) {
+        try {
+          const liveStateStr = await redis.get(`bus:${busId}:live`);
+          if (liveStateStr) {
+            const liveState = JSON.parse(liveStateStr);
+            busLat = liveState.lat;
+            busLon = liveState.lon;
+          }
+        } catch (e) {
+          // Non-critical, continue without bus position
+        }
+      }
+      routeGeometry = await getRouteGeometry(trip.id, assignment.routeId, assignment.stopId, busLat, busLon);
+    }
+
     // Step 5: Build response
     const response: StudentHomeResponse = {
       screenState: deriveStudentScreenState({
@@ -326,6 +417,7 @@ export const studentHomeService = {
           yesterdayDate: yesterdayAbsentLog ? yesterday : null,
           substituteAssigned: isSubstitute,
         },
+        routeGeometry,
       },
       features: {
         hasAssignment: true,

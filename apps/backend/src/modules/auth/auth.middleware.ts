@@ -9,6 +9,7 @@ import { circuitExecute } from '../../lib/redis-circuit'
 import { logger } from '../../lib/logger'
 import { metrics } from '../../lib/metrics'
 import { MobileJWTPayload, Role, AuthAuditEventType } from 'shared'
+import { resolveActor } from '../../spine/auth'
 
 export const requireMobileAuth = async (
   req: FastifyRequest,
@@ -117,11 +118,13 @@ export const requireMobileAuth = async (
   }
 
   // ── All checks passed — attach user to request ───────────────────────
-  req.user = {
+  const authedUser = {
     ...payload,
     role: authState.role as Role,
     userId: payload.sub,
   }
+  req.user = authedUser
+  req.actor = await resolveActor(req, authedUser, 'mobile')
 }
 
 // ── Role guard factory ───────────────────────────────────────────────────────

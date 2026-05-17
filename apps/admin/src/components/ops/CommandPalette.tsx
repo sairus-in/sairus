@@ -1,25 +1,26 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import Fuse from 'fuse.js';
 import { AdminLiveTripState } from 'shared';
-import { Search, Map, Activity, Clock, Users, ArrowRight, AlertCircle, Shield, Bus, FileText, MessageSquare } from 'lucide-react';
 import { api } from '../../lib/api.client';
 import { QK } from '../../lib/query-keys';
 import { Capabilities } from '../../lib/capabilities';
 import { useAuthStore } from '../../store/auth.store';
+import { Icon, IconName } from '../design/Icon';
 
 interface PaletteItem {
   id: string;
   title: string;
   subtitle: string;
-  type: 'ROUTE' | 'TRIP' | 'PAGE';
+  type: 'PAGE' | 'TRIP';
   path: string;
-  icon: React.ReactNode;
+  icon: IconName;
+  shortcut?: string;
 }
 
 type BooleanCapabilityKey = {
-  [K in keyof Capabilities]: Capabilities[K] extends boolean ? K : never
+  [K in keyof Capabilities]: Capabilities[K] extends boolean ? K : never;
 }[keyof Capabilities];
 
 type CommandDefinition = {
@@ -27,115 +28,26 @@ type CommandDefinition = {
   title: string;
   subtitle: string;
   path: string;
-  icon: React.ReactNode;
+  icon: IconName;
   cap: BooleanCapabilityKey | null;
+  shortcut?: string;
 };
 
 const ALL_COMMANDS: readonly CommandDefinition[] = [
-  {
-    id: 'goto-dashboard',
-    title: 'Live Dashboard',
-    subtitle: 'View system health & stats',
-    path: '/ops/dashboard',
-    icon: <Activity size={18} color="#9CA3AF" />,
-    cap: 'canViewDashboard',
-  },
-  {
-    id: 'goto-fleet',
-    title: 'Global Fleet Map',
-    subtitle: 'Track all active buses globally',
-    path: '/ops/fleet',
-    icon: <Map size={18} color="#9CA3AF" />,
-    cap: 'canViewFleetMap',
-  },
-  {
-    id: 'goto-incidents',
-    title: 'Critical Incidents',
-    subtitle: 'Review and resolve active incidents',
-    path: '/ops/incidents',
-    icon: <AlertCircle size={18} color="#9CA3AF" />,
-    cap: 'canViewIncidents',
-  },
-  {
-    id: 'goto-corrections',
-    title: 'Correction Queue',
-    subtitle: 'Approve manual attendance claims',
-    path: '/corrections',
-    icon: <Clock size={18} color="#9CA3AF" />,
-    cap: 'canReviewCorrections',
-  },
-  {
-    id: 'goto-students',
-    title: 'Students',
-    subtitle: 'Manage riders and assignments',
-    path: '/students',
-    icon: <Users size={18} color="#9CA3AF" />,
-    cap: 'canManageStudents',
-  },
-  {
-    id: 'goto-routes',
-    title: 'Routes',
-    subtitle: 'Manage routes and stop sequences',
-    path: '/routes',
-    icon: <Map size={18} color="#9CA3AF" />,
-    cap: 'canManageRoutes',
-  },
-  {
-    id: 'goto-buses',
-    title: 'Buses',
-    subtitle: 'Manage fleet inventory',
-    path: '/buses',
-    icon: <Bus size={18} color="#9CA3AF" />,
-    cap: 'canManageBuses',
-  },
-  {
-    id: 'goto-drivers',
-    title: 'Drivers',
-    subtitle: 'Manage driver records',
-    path: '/drivers',
-    icon: <Users size={18} color="#9CA3AF" />,
-    cap: 'canManageDrivers',
-  },
-  {
-    id: 'goto-attendance',
-    title: 'Attendance Analytics',
-    subtitle: 'Generate CSV reports',
-    path: '/attendance',
-    icon: <FileText size={18} color="#9CA3AF" />,
-    cap: 'canViewAttendanceReports',
-  },
-  {
-    id: 'goto-outages',
-    title: 'GPS Outages',
-    subtitle: 'Review outage queue and overrides',
-    path: '/ops/outages',
-    icon: <AlertCircle size={18} color="#9CA3AF" />,
-    cap: 'canReviewGPSOutage',
-  },
-  {
-    id: 'goto-messages',
-    title: 'Messages',
-    subtitle: 'Open contextual comm threads',
-    path: '/ops/messages',
-    icon: <MessageSquare size={18} color="#9CA3AF" />,
-    cap: 'canViewMessages',
-  },
-  {
-    id: 'goto-audit-log',
-    title: 'Audit Log',
-    subtitle: 'Inspect privileged admin actions',
-    path: '/ops/audit-log',
-    icon: <Shield size={18} color="#9CA3AF" />,
-    cap: 'canViewAuditLog',
-  },
-  {
-    id: 'goto-security',
-    title: 'Security',
-    subtitle: 'Manage account security settings',
-    path: '/security',
-    icon: <Shield size={18} color="#9CA3AF" />,
-    cap: null,
-  },
+  { id: 'goto-dashboard', title: 'Live Dashboard', subtitle: 'View system health and status', path: '/ops/dashboard', icon: 'dashboard', cap: 'canViewDashboard', shortcut: 'Ctrl 1' },
+  { id: 'goto-fleet', title: 'Global Fleet Map', subtitle: 'Track all active buses globally', path: '/ops/fleet', icon: 'map', cap: 'canViewFleetMap', shortcut: 'Ctrl 2' },
+  { id: 'goto-incidents', title: 'Critical Incidents', subtitle: 'Review and resolve active incidents', path: '/ops/incidents', icon: 'incidents', cap: 'canViewIncidents', shortcut: 'Ctrl 4' },
+  { id: 'goto-messages', title: 'Messages', subtitle: 'Open contextual comm threads', path: '/ops/messages', icon: 'comms', cap: 'canViewMessages' },
+  { id: 'goto-outages', title: 'GPS Outages', subtitle: 'Review outage queue and overrides', path: '/ops/outages', icon: 'gps', cap: 'canReviewGPSOutage' },
+  { id: 'goto-audit-log', title: 'Audit Log', subtitle: 'Inspect privileged admin actions', path: '/ops/audit-log', icon: 'reports', cap: 'canViewAuditLog' },
+  { id: 'goto-corrections', title: 'Correction Queue', subtitle: 'Approve manual attendance claims', path: '/corrections', icon: 'clock', cap: 'canReviewCorrections' },
+  { id: 'goto-students', title: 'Students', subtitle: 'Manage riders and assignments', path: '/students', icon: 'users', cap: 'canManageStudents' },
+  { id: 'goto-routes', title: 'Routes', subtitle: 'Manage routes and stop sequences', path: '/routes', icon: 'routes', cap: 'canManageRoutes' },
+  { id: 'goto-buses', title: 'Buses', subtitle: 'Manage fleet inventory', path: '/buses', icon: 'fleet', cap: 'canManageBuses' },
+  { id: 'goto-drivers', title: 'Drivers', subtitle: 'Manage driver records', path: '/drivers', icon: 'users', cap: 'canManageDrivers' },
+  { id: 'goto-attendance', title: 'Attendance Analytics', subtitle: 'Generate and inspect attendance reports', path: '/attendance', icon: 'reports', cap: 'canViewAttendanceReports' },
+  { id: 'goto-security', title: 'Security', subtitle: 'Manage account security settings', path: '/security', icon: 'ops', cap: 'canViewSecuritySettings' },
+  { id: 'goto-admin-users', title: 'Admin Users', subtitle: 'Invite and manage admin accounts', path: '/admin-users', icon: 'users', cap: 'canInviteAdmin' },
 ];
 
 export const CommandPalette: React.FC = () => {
@@ -148,173 +60,180 @@ export const CommandPalette: React.FC = () => {
 
   const { data: activeTrips = [] } = useQuery({
     queryKey: QK.activeTrips(),
-    queryFn: (): Promise<AdminLiveTripState[]> => api.get<AdminLiveTripState[]>('/v1/admin/live/trips/active'),
-    enabled: !!capabilities?.canViewDashboard,
+    queryFn: async (): Promise<AdminLiveTripState[]> => {
+      const response = await api.getList<AdminLiveTripState>('/v1/admin/live/trips/active');
+      return response.data;
+    },
+    enabled: Boolean(capabilities?.canViewDashboard || capabilities?.canViewTripDetail),
   });
 
   const searchItems = useMemo<PaletteItem[]>(() => {
-    const visibleCommands: PaletteItem[] = ALL_COMMANDS
+    const visibleCommands = ALL_COMMANDS
       .filter((command) => command.cap === null || capabilities?.[command.cap])
-      .map((command) => ({
+      .map<PaletteItem>((command) => ({
         id: command.id,
         title: command.title,
         subtitle: command.subtitle,
         type: 'PAGE',
         path: command.path,
         icon: command.icon,
+        shortcut: command.shortcut,
       }));
 
-    const tripItems: PaletteItem[] = activeTrips.map((trip) => ({
-      id: `t_${trip.id}`,
-      title: `Bus ${trip.busNumber}`,
-      subtitle: `${trip.routeName} - ${Math.round((Date.now() - Number(trip.startedAt)) / 60000)}m enroute`,
-      type: 'TRIP',
-      path: `/ops/trips/${trip.id}`,
-      icon: <ArrowRight size={18} color="#3B82F6" />,
-    }));
+    const tripItems = capabilities?.canViewTripDetail
+      ? activeTrips.map<PaletteItem>((trip) => ({
+          id: `trip-${trip.id}`,
+          title: `Bus ${trip.busNumber}`,
+          subtitle: `${trip.routeName} - ${Math.round((Date.now() - Number(trip.startedAt)) / 60000)}m enroute`,
+          type: 'TRIP',
+          path: `/ops/trips/${trip.id}`,
+          icon: 'arrowRight',
+        }))
+      : [];
 
     return [...visibleCommands, ...tripItems];
   }, [activeTrips, capabilities]);
 
-  const fuse = new Fuse(searchItems, {
-    keys: ['title', 'subtitle', 'type'],
-    threshold: 0.3,
-  });
+  const fuse = useMemo(
+    () =>
+      new Fuse(searchItems, {
+        keys: ['title', 'subtitle', 'type'],
+        threshold: 0.3,
+      }),
+    [searchItems],
+  );
 
-  const results = query ? fuse.search(query).map(r => r.item) : searchItems;
+  const results = query ? fuse.search(query).map((result) => result.item) : searchItems;
 
   useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setIsOpen((open) => !open);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setIsOpen((current) => !current);
       }
-      if (e.key === 'Escape') {
+
+      if (event.key === 'Escape') {
         setIsOpen(false);
       }
     };
 
-    document.addEventListener('keydown', down);
-    return () => document.removeEventListener('keydown', down);
+    const open = (_event: Event) => setIsOpen(true);
+    const close = (_event: Event) => setIsOpen(false);
+    const toggle = (_event: Event) => setIsOpen((current) => !current);
+
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('admin-command-palette:open', open);
+    window.addEventListener('admin-command-palette:close', close);
+    window.addEventListener('admin-command-palette:toggle', toggle);
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('admin-command-palette:open', open);
+      window.removeEventListener('admin-command-palette:close', close);
+      window.removeEventListener('admin-command-palette:toggle', toggle);
+    };
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 10);
-      setSelectedIndex(0);
-    } else {
+    if (!isOpen) {
       setQuery('');
+      return;
     }
+
+    setSelectedIndex(0);
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 10);
+    return () => window.clearTimeout(timer);
   }, [isOpen]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIndex(prev => (prev + 1) % results.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex(prev => (prev - 1 + results.length) % results.length);
-    } else if (e.key === 'Enter' && results[selectedIndex]) {
-      e.preventDefault();
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (results.length === 0) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setSelectedIndex((current) => (current + 1) % results.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setSelectedIndex((current) => (current - 1 + results.length) % results.length);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
       navigate(results[selectedIndex].path);
       setIsOpen(false);
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return null;
+  }
+
+  const pageItems = results.filter((item) => item.type === 'PAGE');
+  const tripItems = results.filter((item) => item.type === 'TRIP');
+  const grouped = [
+    { label: 'Navigate', items: pageItems },
+    { label: 'Active Trips', items: tripItems },
+  ].filter((group) => group.items.length > 0);
+
+  let runningIndex = -1;
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0,
-      backgroundColor: 'rgba(17, 24, 39, 0.7)',
-      backdropFilter: 'blur(4px)',
-      zIndex: 9999,
-      display: 'flex',
-      alignItems: 'flex-start',
-      justifyContent: 'center',
-      paddingTop: '10vh'
-    }} onClick={() => setIsOpen(false)}>
-      
-      <div 
-        style={{
-          width: '100%',
-          maxWidth: '600px',
-          backgroundColor: '#1F2937',
-          borderRadius: '1rem',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-          overflow: 'hidden',
-          border: '1px solid #374151'
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', padding: '1rem 1.5rem', borderBottom: '1px solid #374151' }}>
-          <Search size={22} color="#9CA3AF" />
-          <input 
+    <div className="cmd-backdrop" onClick={() => setIsOpen(false)}>
+      <div className="cmd-palette" onClick={(event) => event.stopPropagation()}>
+        <div className="cmd-palette__input">
+          <Icon name="search" size={16} />
+          <input
             ref={inputRef}
+            className="cmd-palette__field"
             type="text"
-            placeholder="Search trips, features, or drivers... (Cmd+K)"
+            placeholder="Search actions, trips, buses, drivers..."
             value={query}
-            onChange={e => { setQuery(e.target.value); setSelectedIndex(0); }}
-            onKeyDown={handleKeyDown}
-            style={{
-              flex: 1, backgroundColor: 'transparent', border: 'none',
-              outline: 'none', color: 'white', fontSize: '1.125rem',
-              marginLeft: '1rem', padding: 0
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSelectedIndex(0);
             }}
+            onKeyDown={handleKeyDown}
           />
-          <kbd style={{ backgroundColor: '#374151', color: '#D1D5DB', padding: '0.25rem 0.5rem', borderRadius: '0.375rem', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-            ESC
-          </kbd>
+          <span className="searchbar__kbd">ESC</span>
         </div>
 
-        <div style={{ padding: '0.5rem', maxHeight: '400px', overflowY: 'auto' }}>
+        <div className="cmd-palette__list scroll">
           {results.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#9CA3AF' }}>
-              No results found for "{query}"
-            </div>
+            <div className="cmd-palette__group">No results for "{query}"</div>
           ) : (
-            results.map((item, idx) => (
-              <div 
-                key={item.id}
-                onMouseEnter={() => setSelectedIndex(idx)}
-                onClick={() => { navigate(item.path); setIsOpen(false); }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  backgroundColor: selectedIndex === idx ? '#374151' : 'transparent',
-                  transition: 'background-color 0.1s'
-                }}
-              >
-                <div style={{ 
-                  marginRight: '1rem', padding: '0.5rem', 
-                  backgroundColor: selectedIndex === idx ? '#4B5563' : '#374151',
-                  borderRadius: '0.375rem' 
-                }}>
-                  {item.icon}
-                </div>
-                <div>
-                  <div style={{ color: 'white', fontWeight: '500', fontSize: '1rem' }}>{item.title}</div>
-                  <div style={{ color: '#9CA3AF', fontSize: '0.875rem' }}>{item.subtitle}</div>
-                </div>
-                <div style={{ marginLeft: 'auto' }}>
-                  <span style={{ 
-                    fontSize: '0.65rem', fontWeight: 'bold', letterSpacing: '0.05em',
-                    backgroundColor: item.type === 'PAGE' ? '#1E3A8A' : (item.type === 'TRIP' ? '#064E3B' : '#4B5563'),
-                    color: item.type === 'PAGE' ? '#60A5FA' : (item.type === 'TRIP' ? '#34D399' : '#D1D5DB'),
-                    padding: '0.25rem 0.5rem', borderRadius: '9999px'
-                  }}>
-                    {item.type}
-                  </span>
-                </div>
+            grouped.map((group) => (
+              <div key={group.label}>
+                <div className="cmd-palette__group">{group.label}</div>
+                {group.items.map((item) => {
+                  runningIndex += 1;
+                  const index = runningIndex;
+
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`cmd-palette__item ${selectedIndex === index ? 'is-active' : ''}`}
+                      onMouseEnter={() => setSelectedIndex(index)}
+                      onClick={() => {
+                        navigate(item.path);
+                        setIsOpen(false);
+                      }}
+                    >
+                      <Icon name={item.icon} size={16} />
+                      <div>
+                        <div>{item.title}</div>
+                        <div className="cmd-palette__item-subtitle">{item.subtitle}</div>
+                      </div>
+                      <span className="cmd-palette__item-kbd">{item.shortcut ?? item.type}</span>
+                    </button>
+                  );
+                })}
               </div>
             ))
           )}
         </div>
       </div>
-
     </div>
   );
 };
+
+export default CommandPalette;

@@ -4,10 +4,15 @@ import { AppError } from '../../lib/errors';
 import { ok } from 'shared';
 import { serializeDriverAssignment } from './driver.serializers';
 import { driverService } from './driver.service';
+import { tripsService } from '../trips/trips.service';
 import * as z from 'zod';
 
-const startTripSchema = z.object({
+const startTripBodySchema = z.object({
   tripId: z.string().cuid(),
+});
+
+const tripIdParamsSchema = z.object({
+  tripId: z.string().min(1),
 });
 
 export async function driverRoutes(app: FastifyInstance) {
@@ -30,25 +35,19 @@ export async function driverRoutes(app: FastifyInstance) {
     );
   });
 
-  // POST /start-trip — DEPRECATED endpoint (returns 410)
+  // POST /start-trip — legacy compatibility shim.
   app.post('/start-trip', {
     preHandler: mobileRoute(['DRIVER']),
   }, async (request, reply) => {
-    const parsed = startTripSchema.safeParse(request.body);
+    const parsed = startTripBodySchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    return reply.code(410).send(
-      ok(
-        {
-          error: 'ENDPOINT_DEPRECATED',
-          message: 'This endpoint is deprecated. Use PATCH /v1/trips/:tripId/start instead.',
-          canonical: `/v1/trips/${parsed.data.tripId}/start`,
-        },
-        request.id,
-      ),
-    );
+    const trip = await tripsService.startTrip(parsed.data.tripId, request.user!.sub);
+    reply.header('Deprecation', 'true');
+    reply.header('Link', `</v1/trips/${parsed.data.tripId}/start>; rel="successor-version"`);
+    return reply.send(ok(trip, request.id));
   });
 
   // GET /route-stops — get all stops for driver's assigned route
@@ -69,19 +68,22 @@ export async function driverRoutes(app: FastifyInstance) {
     return reply.send(ok(summary, request.id));
   });
 
-  // POST /end-trip/:tripId — DEPRECATED endpoint (returns 410)
+  // POST /end-trip/:tripId — legacy compatibility shim.
   app.post<{ Params: { tripId: string } }>('/end-trip/:tripId', {
     preHandler: mobileRoute(['DRIVER']),
   }, async (request, reply) => {
-    return reply.code(410).send(
-      ok(
-        {
-          error: 'ENDPOINT_DEPRECATED',
-          message: 'This endpoint is deprecated. Use POST /v1/trips/:tripId/end instead.',
-          canonical: `/v1/trips/${request.params.tripId}/end`,
-        },
-        request.id,
-      ),
-    );
+    const parsed = tripIdParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
+    }
+
+    const trip = await tripsService.endTrip(parsed.data.tripId, request.user!.sub, {
+      actorType: 'MOBILE_USER',
+      actorId: request.user!.sub,
+      ip: request.ip,
+    });
+    reply.header('Deprecation', 'true');
+    reply.header('Link', `</v1/trips/${parsed.data.tripId}/end>; rel="successor-version"`);
+    return reply.send(ok(trip, request.id));
   });
 }

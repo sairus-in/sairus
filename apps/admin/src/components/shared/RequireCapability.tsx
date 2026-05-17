@@ -16,13 +16,10 @@ export const RequireCapability: React.FC<RequireCapabilityProps> = ({ capability
   const { capabilities, isAuthenticated } = useAuthStore();
 
   if (!isAuthenticated || !capabilities) {
-    console.warn(`[RequireCapability] Redirecting to login - auth state: ${isAuthenticated}, capabilities: ${JSON.stringify(capabilities)}`);
     return <Navigate to="/login" replace />;
   }
 
-  // Ensure boolean check (not just truthy scope strings)
   if (capabilities[capability] !== true) {
-    console.warn(`[RequireCapability] Access Denied for capability: ${capability}`, { capabilities });
     return (
       <div style={{ padding: '2rem', textAlign: 'center' }}>
         <h2 style={{ fontSize: '1.5rem', color: '#DC2626' }}>Access Denied</h2>
@@ -31,6 +28,5 @@ export const RequireCapability: React.FC<RequireCapabilityProps> = ({ capability
     );
   }
 
-  console.log(`[RequireCapability] Access Granted for capability: ${capability}`);
   return <>{children}</>;
 };

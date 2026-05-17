@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AdminIncident, AdminMessageInput } from 'shared';
+import { AdminMessageInput } from 'shared';
 import { useTripLive, useTripStudents, useTripTimeline } from '../../hooks/useTripDetail';
-import { StatusBadge, type StatusKey } from '../../lib/status';
-import { AlertTriangle, ArrowLeft, Bus, Clock, MessageSquare, Radio, Users } from 'lucide-react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { Icon } from '../../components/design/Icon';
+import { StateBadge } from '../../components/design/primitives';
+import { format, formatDistanceToNow } from 'date-fns';
 import { api } from '../../lib/api.client';
 import { extractApiError } from '../../lib/api-error';
 import { useAuthStore } from '../../store/auth.store';
@@ -19,31 +19,6 @@ import {
   useSubstituteCandidates,
 } from '../../hooks/useCommandCenter';
 import { useMessages } from '../../hooks/useMessages';
-
-const panelStyle: React.CSSProperties = {
-  background: '#111827',
-  borderRadius: '0.75rem',
-  border: '1px solid #374151',
-  padding: '1rem',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '1rem',
-};
-
-const incidentStatusToBadge = (status: AdminIncident['status']): StatusKey => {
-  switch (status) {
-    case 'REPORTED':
-      return 'INCIDENT_ACTIVE';
-    case 'ASSIGNED':
-      return 'INCIDENT_ASSIGNED';
-    case 'RESOLVED':
-      return 'INCIDENT_RESOLVED';
-    case 'CANCELLED':
-      return 'OFFLINE';
-    default:
-      return 'INCIDENT_ACTIVE';
-  }
-};
 
 export const TripDetail: React.FC = () => {
   const { id = '' } = useParams<{ id: string }>();
@@ -92,7 +67,10 @@ export const TripDetail: React.FC = () => {
   });
 
   const activeIncident = useMemo(
-    () => incidents.find((incident) => incident.tripId === id && (incident.status === 'REPORTED' || incident.status === 'ASSIGNED')) ?? null,
+    () =>
+      incidents.find(
+        (incident) => incident.tripId === id && (incident.status === 'REPORTED' || incident.status === 'ASSIGNED'),
+      ) ?? null,
     [id, incidents],
   );
 
@@ -120,17 +98,13 @@ export const TripDetail: React.FC = () => {
   const { data: substituteCandidates = [] } = useSubstituteCandidates(id);
 
   const handleSendMessage = async () => {
-    if (!composer.trim()) {
-      return;
-    }
-
+    if (!composer.trim()) return;
     try {
       const payload: AdminMessageInput = {
         body: composer.trim(),
         priority: activeIncident ? 'URGENT' : 'NORMAL',
         context: threadContext,
       };
-
       await sendContextMessage.mutateAsync(payload);
       setComposer('');
     } catch (error) {
@@ -156,10 +130,7 @@ export const TripDetail: React.FC = () => {
   };
 
   const handleResolve = async () => {
-    if (!activeIncident) {
-      return;
-    }
-
+    if (!activeIncident) return;
     try {
       await resolveIncident.mutateAsync({
         incidentId: activeIncident.id,
@@ -171,10 +142,7 @@ export const TripDetail: React.FC = () => {
   };
 
   const handleEscalate = async () => {
-    if (!activeIncident) {
-      return;
-    }
-
+    if (!activeIncident) return;
     try {
       await escalateIncident.mutateAsync({
         incidentId: activeIncident.id,
@@ -190,7 +158,6 @@ export const TripDetail: React.FC = () => {
       setActionError('Select a substitute bus before assigning.');
       return;
     }
-
     try {
       await assignSubstitute.mutateAsync({
         incidentId: activeIncident.id,
@@ -211,263 +178,358 @@ export const TripDetail: React.FC = () => {
   };
 
   if (isLiveLoading || isStudentsLoading || isTimelineLoading || isIncidentsLoading) {
-    return <div style={{ color: '#9CA3AF' }}>Loading live trip data...</div>;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 4 }}>
+        <div className="skel" style={{ height: 28, width: 240, borderRadius: 8 }} />
+        <div className="skel" style={{ height: 80, borderRadius: 12 }} />
+        <div className="skel" style={{ height: 180, borderRadius: 12 }} />
+      </div>
+    );
   }
 
   if (tripLiveError) {
     return (
-      <div style={{ padding: '1rem', borderRadius: '0.75rem', background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
+      <div className="card" style={{ padding: '14px 16px', borderColor: 'var(--err)', background: 'var(--err-soft)', color: 'var(--err)' }}>
         {extractApiError(tripLiveError).message}
       </div>
     );
   }
 
   if (!tripLive) {
-    return <div style={{ color: '#EF4444' }}>Trip {id} is not currently active.</div>;
+    return (
+      <div style={{ color: 'var(--muted)', fontSize: 13 }}>Trip {id} is not currently active.</div>
+    );
   }
 
   const secondaryError = studentsError || timelineError || incidentsError;
   const secondaryErrorMessage = secondaryError ? extractApiError(secondaryError).message : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, animation: 'fleetops-fade-in 280ms var(--ease-out) both' }}>
+
+      {/* Back + header */}
       <div>
         <button
-          onClick={() => navigate('/ops/dashboard')}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', padding: 0, marginBottom: '1rem' }}
-          className="hover:text-white"
+          type="button"
+          className="btn ghost sm"
+          onClick={() => navigate('/ops/trips')}
+          style={{ gap: 6, marginBottom: 16, paddingLeft: 0 }}
         >
-          <ArrowLeft size={16} /> Back to Dashboard
+          <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}><Icon name="arrow" size={13} /></span>
+          All trips
         </button>
 
-      {secondaryErrorMessage && (
-        <div style={{ padding: '0.9rem 1rem', borderRadius: 14, background: 'rgba(127, 29, 29, 0.45)', border: '1px solid rgba(248, 113, 113, 0.35)', color: '#FCA5A5' }}>
-          {secondaryErrorMessage}
-        </div>
-      )}
+        {secondaryErrorMessage && (
+          <div className="card" style={{ marginBottom: 16, padding: '10px 14px', borderColor: 'var(--err)', background: 'var(--err-soft)', color: 'var(--err)', fontSize: 12 }}>
+            {secondaryErrorMessage}
+          </div>
+        )}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
           <div>
-            <div style={{ fontSize: '0.78rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#38BDF8', fontWeight: 800 }}>
+            <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>
               Trip Command
             </div>
-            <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', margin: '0.35rem 0 0.5rem 0' }}>
-              Bus {tripLive.busNumber} - {tripLive.routeName}
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 500, letterSpacing: '-0.02em', margin: '0 0 4px' }}>
+              Bus {tripLive.busNumber} — {tripLive.routeName}
             </h1>
-            <p style={{ margin: 0, color: '#9CA3AF' }}>
-              Driver: {tripLive.driverName || 'Unknown'}
+            <p style={{ margin: 0, color: 'var(--muted)', fontSize: 13 }}>
+              {tripLive.driverName ? `Driver: ${tripLive.driverName}` : 'Driver unassigned'}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            {activeIncident && <StatusBadge status={incidentStatusToBadge(activeIncident.status)} />}
-            <StatusBadge status={tripLive.gpsStatus === 'OFFLINE' ? 'GPS_OFFLINE' : tripLive.gpsStatus === 'STALE' ? 'GPS_STALE' : 'GPS_LIVE'} />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+            {activeIncident && <StateBadge state={activeIncident.status} />}
+            <StateBadge state={tripLive.gpsStatus} />
+            <StateBadge state={tripLive.status} />
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '2rem', marginTop: '1.5rem', color: '#E5E7EB', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Users size={18} color="#9CA3AF" />
-            <span style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{tripLive.boardedCount}</span>
-            <span style={{ color: '#9CA3AF' }}>/ {tripLive.expectedCount} boarded</span>
+        {/* KPI strip */}
+        <div style={{ display: 'flex', gap: 20, marginTop: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon name="users" size={14} className="dim" />
+            <span style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 500, letterSpacing: '-0.02em' }}>
+              {tripLive.boardedCount}
+            </span>
+            <span className="dim" style={{ fontSize: 13 }}>/ {tripLive.expectedCount} boarded</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Clock size={18} color="#9CA3AF" />
-            <span>Started {formatDistanceToNow(new Date(tripLive.startedAt))} ago</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon name="clock" size={14} className="dim" />
+            <span className="dim" style={{ fontSize: 13 }}>
+              Started {formatDistanceToNow(new Date(tripLive.startedAt))} ago
+            </span>
           </div>
           {activeIncident && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <AlertTriangle size={18} color="#EF4444" />
-              <span>{activeIncident.type.replace(/_/g, ' ')} active</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: 'var(--err)', display: 'inline-flex' }}><Icon name="alert" size={14} /></span>
+              <span style={{ fontSize: 13, color: 'var(--err)' }}>
+                {activeIncident.type.replace(/_/g, ' ')} active
+              </span>
             </div>
           )}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) 360px', gap: '1rem', alignItems: 'start' }}>
-        <div style={{ ...panelStyle, gap: '0.85rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
+      {/* Command panel + comms */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) 360px', gap: 16, alignItems: 'start' }}>
+
+        {/* Command panel */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>Command panel</h2>
-              <div style={{ marginTop: '0.25rem', color: '#94A3B8', fontSize: '0.82rem' }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em' }}>
+                Command panel
+              </h2>
+              <div style={{ marginTop: 3, color: 'var(--muted)', fontSize: 12 }}>
                 Act on this trip directly, with comms bound to the trip or current incident.
               </div>
             </div>
-            <Radio size={18} color="#60A5FA" />
+            <Icon name="radio" size={16} className="dim" />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
             <button
               type="button"
-              onClick={() => setComposer(`Transport office check-in: confirm trip status, location, and ETA for Bus ${tripLive.busNumber}.`)}
+              className="btn primary"
+              style={{ minHeight: 44 }}
+              onClick={() =>
+                setComposer(
+                  `Transport office check-in: confirm trip status, location, and ETA for Bus ${tripLive.busNumber}.`,
+                )
+              }
               disabled={!capabilities?.canMessageDrivers}
-              style={{ border: 0, borderRadius: 14, background: capabilities?.canMessageDrivers ? '#0EA5E9' : '#334155', color: '#FFFFFF', padding: '0.9rem', fontWeight: 700, cursor: capabilities?.canMessageDrivers ? 'pointer' : 'not-allowed' }}
             >
               Contact driver
             </button>
+
             <button
               type="button"
+              className="btn"
+              style={{ minHeight: 44 }}
               onClick={() => void handleNotify()}
               disabled={!capabilities?.canMessageDrivers}
-              style={{ border: '1px solid #334155', borderRadius: 14, background: capabilities?.canMessageDrivers ? '#1E293B' : '#0F172A', color: capabilities?.canMessageDrivers ? '#F8FAFC' : '#64748B', padding: '0.9rem', fontWeight: 700, cursor: capabilities?.canMessageDrivers ? 'pointer' : 'not-allowed' }}
             >
               Notify riders
             </button>
+
             <button
               type="button"
+              className="btn"
+              style={{ minHeight: 44 }}
               onClick={() => void handleRequestDelegate()}
               disabled={!capabilities?.canAssignSubstitute}
-              style={{ border: '1px solid #334155', borderRadius: 14, background: capabilities?.canAssignSubstitute ? '#1E293B' : '#0F172A', color: capabilities?.canAssignSubstitute ? '#F8FAFC' : '#64748B', padding: '0.9rem', fontWeight: 700, cursor: capabilities?.canAssignSubstitute ? 'pointer' : 'not-allowed' }}
             >
               Request delegate
             </button>
+
             <button
               type="button"
+              className="btn warn"
+              style={{ minHeight: 44 }}
               onClick={() => void handleCoordinatorOverride()}
               disabled={!capabilities?.canCoordinatorOverride || tripLive.gpsStatus !== 'OFFLINE'}
-              style={{ border: 0, borderRadius: 14, background: capabilities?.canCoordinatorOverride && tripLive.gpsStatus === 'OFFLINE' ? '#F97316' : '#334155', color: '#FFFFFF', padding: '0.9rem', fontWeight: 700, cursor: capabilities?.canCoordinatorOverride && tripLive.gpsStatus === 'OFFLINE' ? 'pointer' : 'not-allowed' }}
             >
               GPS override
             </button>
+
             <button
               type="button"
+              className="btn danger"
+              style={{ minHeight: 44 }}
               onClick={() => void handleEscalate()}
               disabled={!capabilities?.canEscalateIncidents || !activeIncident}
-              style={{ border: 0, borderRadius: 14, background: capabilities?.canEscalateIncidents && activeIncident ? '#E11D48' : '#334155', color: '#FFFFFF', padding: '0.9rem', fontWeight: 700, cursor: capabilities?.canEscalateIncidents && activeIncident ? 'pointer' : 'not-allowed' }}
             >
               Escalate incident
             </button>
+
             <button
               type="button"
+              className="btn ok"
+              style={{ minHeight: 44 }}
               onClick={() => void handleResolve()}
               disabled={!capabilities?.canResolveIncidents || !activeIncident}
-              style={{ border: 0, borderRadius: 14, background: capabilities?.canResolveIncidents && activeIncident ? '#22C55E' : '#334155', color: '#FFFFFF', padding: '0.9rem', fontWeight: 700, cursor: capabilities?.canResolveIncidents && activeIncident ? 'pointer' : 'not-allowed' }}
             >
               Resolve incident
             </button>
           </div>
 
           {activeIncident && (
-            <div style={{ borderRadius: 16, background: '#0F172A', border: '1px solid #334155', padding: '0.95rem', display: 'grid', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#F8FAFC', fontWeight: 700 }}>
-                <Bus size={18} />
+            <div className="card" style={{ padding: 14, display: 'grid', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-display)', fontSize: 13, fontWeight: 500 }}>
+                <Icon name="bus" size={14} />
                 Substitute workflow
               </div>
               <select
                 value={selectedAlternateBusId}
-                onChange={(event) => setSelectedAlternateBusId(event.target.value)}
+                onChange={(e) => setSelectedAlternateBusId(e.target.value)}
                 disabled={!capabilities?.canAssignSubstitute}
-                style={{ width: '100%', borderRadius: 12, border: '1px solid #334155', background: '#020617', color: '#F8FAFC', padding: '0.75rem 0.8rem' }}
+                style={{
+                  width: '100%',
+                  borderRadius: 'var(--r-md)',
+                  border: '1px solid var(--border-2)',
+                  background: 'var(--surface-2)',
+                  color: 'var(--ink)',
+                  padding: '8px 10px',
+                  fontSize: 12,
+                }}
               >
                 <option value="">Select alternate bus</option>
                 {substituteCandidates.map((candidate) => (
                   <option key={candidate.busId} value={candidate.busId}>
-                    Bus {candidate.busNumber} | {candidate.driverName || 'No driver'} {candidate.isCurrentlyActive ? '| busy' : '| standby'}
+                    Bus {candidate.busNumber} | {candidate.driverName || 'No driver'}{' '}
+                    {candidate.isCurrentlyActive ? '| busy' : '| standby'}
                   </option>
                 ))}
               </select>
               <button
                 type="button"
+                className="btn primary"
                 onClick={() => void handleAssignSubstitute()}
                 disabled={!capabilities?.canAssignSubstitute}
-                style={{ border: 0, borderRadius: 14, background: capabilities?.canAssignSubstitute ? '#7C3AED' : '#334155', color: '#FFFFFF', padding: '0.85rem 1rem', fontWeight: 700, cursor: capabilities?.canAssignSubstitute ? 'pointer' : 'not-allowed' }}
               >
                 Assign substitute
               </button>
             </div>
           )}
 
-          <div style={{ display: 'grid', gap: '0.6rem' }}>
-            <label style={{ color: '#CBD5E1', fontSize: '0.84rem', fontWeight: 700 }}>Operational note</label>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <label style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              Operational note
+            </label>
             <textarea
               value={resolutionNote}
-              onChange={(event) => setResolutionNote(event.target.value)}
+              onChange={(e) => setResolutionNote(e.target.value)}
               rows={4}
               placeholder="Document the recovery path, escalation rationale, or incident resolution."
-              style={{ resize: 'vertical', borderRadius: 16, border: '1px solid #334155', background: '#020617', color: '#F8FAFC', padding: '0.85rem 0.9rem' }}
+              style={{
+                resize: 'vertical',
+                borderRadius: 'var(--r-md)',
+                border: '1px solid var(--border-2)',
+                background: 'var(--surface-2)',
+                color: 'var(--ink)',
+                padding: '8px 10px',
+                fontSize: 12,
+                fontFamily: 'var(--font-text)',
+              }}
             />
           </div>
 
           {actionError && (
-            <div style={{ borderRadius: 14, background: 'rgba(127, 29, 29, 0.45)', border: '1px solid rgba(248, 113, 113, 0.35)', color: '#FCA5A5', padding: '0.85rem 0.95rem' }}>
+            <div className="card" style={{ padding: '10px 14px', borderColor: 'var(--err)', background: 'var(--err-soft)', color: 'var(--err)', fontSize: 12 }}>
               {actionError}
             </div>
           )}
         </div>
 
-        <div style={{ ...panelStyle }}>
+        {/* Action comms */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16 }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>Action comms</h2>
-            <div style={{ marginTop: '0.25rem', color: '#94A3B8', fontSize: '0.82rem' }}>
+            <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, letterSpacing: '-0.01em' }}>
+              Action comms
+            </h2>
+            <div style={{ marginTop: 3, color: 'var(--muted)', fontSize: 12 }}>
               {activeIncident ? 'INCIDENT thread attached to this trip' : 'TRIP thread'}
             </div>
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse', gap: '0.75rem', minHeight: 220 }}>
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column-reverse', gap: 8, minHeight: 200 }}>
             {threadMessages.length === 0 ? (
-              <div style={{ color: '#94A3B8', fontSize: '0.86rem' }}>No contextual messages yet.</div>
+              <p className="dim" style={{ fontSize: 12, margin: 0 }}>No contextual messages yet.</p>
             ) : (
               threadMessages.map((message) => (
-                <div key={message.id} style={{ borderRadius: 16, background: '#0F172A', border: '1px solid #1E293B', padding: '0.85rem 0.9rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.6rem', color: '#94A3B8', fontSize: '0.74rem' }}>
-                    <span>{message.sender.name} ({message.sender.role})</span>
+                <div
+                  key={message.id}
+                  className="card"
+                  style={{ padding: '8px 12px', background: 'var(--surface-2)' }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4, fontSize: 11, color: 'var(--muted)' }}>
+                    <span>
+                      {message.sender.name}
+                      <span style={{ marginLeft: 4 }}>({message.sender.role})</span>
+                    </span>
                     <span>{formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}</span>
                   </div>
-                  <div style={{ marginTop: '0.45rem', color: '#F8FAFC', lineHeight: 1.5 }}>{message.body}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>{message.body}</div>
                 </div>
               ))
             )}
           </div>
 
-          <div style={{ display: 'grid', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gap: 8 }}>
             <textarea
               value={composer}
-              onChange={(event) => setComposer(event.target.value)}
+              onChange={(e) => setComposer(e.target.value)}
               rows={4}
-              placeholder={capabilities?.canMessageDrivers ? 'Send a trip-level operational update...' : 'Read-only for your role'}
+              placeholder={
+                capabilities?.canMessageDrivers
+                  ? 'Send a trip-level operational update…'
+                  : 'Read-only for your role'
+              }
               disabled={!capabilities?.canMessageDrivers}
-              style={{ resize: 'vertical', borderRadius: 16, border: '1px solid #334155', background: '#020617', color: '#F8FAFC', padding: '0.85rem 0.9rem' }}
+              style={{
+                resize: 'vertical',
+                borderRadius: 'var(--r-md)',
+                border: '1px solid var(--border-2)',
+                background: 'var(--surface-2)',
+                color: 'var(--ink)',
+                padding: '8px 10px',
+                fontSize: 12,
+                fontFamily: 'var(--font-text)',
+              }}
             />
             <button
               type="button"
+              className="btn primary"
               onClick={() => void handleSendMessage()}
               disabled={!capabilities?.canMessageDrivers || !composer.trim()}
-              style={{ border: 0, borderRadius: 14, background: !capabilities?.canMessageDrivers || !composer.trim() ? '#334155' : '#0EA5E9', color: '#FFFFFF', padding: '0.9rem 1rem', fontWeight: 800, cursor: !capabilities?.canMessageDrivers || !composer.trim() ? 'not-allowed' : 'pointer' }}
             >
+              <Icon name="send" size={12} />
               Send contextual update
             </button>
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', alignItems: 'start' }}>
-        <div style={panelStyle}>
-          <div style={{ paddingBottom: '0.25rem', borderBottom: '1px solid #374151' }}>
-            <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: '600' }}>Student Manifest ({students.length})</h2>
-          </div>
+      {/* Manifest + timeline */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, alignItems: 'start' }}>
 
-          <div>
+        {/* Student manifest */}
+        <div className="card">
+          <div className="card-head">
+            <h3>Student Manifest ({students.length})</h3>
+            <Icon name="users" size={14} className="dim" />
+          </div>
+          <div className="card-body" style={{ padding: 0 }}>
             {isStudentsLoading ? (
-              <div style={{ padding: '2rem 0', color: '#9CA3AF' }}>Loading manifest...</div>
+              <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="skel" style={{ height: 36, borderRadius: 6 }} />
+                ))}
+              </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+              <table className="table">
                 <thead>
-                  <tr style={{ color: '#9CA3AF', borderBottom: '1px solid #374151' }}>
-                    <th style={{ padding: '1rem 0', fontWeight: '500' }}>Student</th>
-                    <th style={{ padding: '1rem 0', fontWeight: '500' }}>Roll No.</th>
-                    <th style={{ padding: '1rem 0', fontWeight: '500' }}>Status</th>
-                    <th style={{ padding: '1rem 0', fontWeight: '500', textAlign: 'right' }}>Time</th>
+                  <tr>
+                    <th>Student</th>
+                    <th>Roll No.</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Time</th>
                   </tr>
                 </thead>
                 <tbody>
                   {students.map((student) => (
-                    <tr key={student.id} style={{ borderBottom: '1px solid #374151' }}>
-                      <td style={{ padding: '1rem 0', color: 'white', fontWeight: '500' }}>{student.user.name}</td>
-                      <td style={{ padding: '1rem 0', color: '#9CA3AF' }}>{student.user.rollNumber || '--'}</td>
-                      <td style={{ padding: '1rem 0' }}>
-                        <StatusBadge status={student.status} />
+                    <tr key={student.id}>
+                      <td style={{ color: 'var(--ink)', fontWeight: 500, fontSize: 12.5 }}>
+                        {student.user.name}
                       </td>
-                      <td style={{ padding: '1rem 0', textAlign: 'right', color: '#9CA3AF' }}>
-                        {student.checkedInAt ? format(new Date(student.checkedInAt), 'h:mm a') : '--'}
+                      <td className="mono dim">{student.user.rollNumber || '—'}</td>
+                      <td>
+                        <StateBadge state={student.status} />
+                      </td>
+                      <td style={{ textAlign: 'right', fontSize: 11.5, color: 'var(--muted)' }}>
+                        {student.checkedInAt
+                          ? format(new Date(student.checkedInAt), 'h:mm a')
+                          : '—'}
                       </td>
                     </tr>
                   ))}
@@ -477,32 +539,40 @@ export const TripDetail: React.FC = () => {
           </div>
         </div>
 
-        <div style={panelStyle}>
-          <div style={{ paddingBottom: '0.25rem', borderBottom: '1px solid #374151', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: '600' }}>Event Timeline</h2>
-            <MessageSquare size={18} color="#60A5FA" />
+        {/* Event timeline */}
+        <div className="card">
+          <div className="card-head">
+            <h3>Event Timeline</h3>
+            <Icon name="clock" size={14} className="dim" />
           </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div className="card-body">
             {isTimelineLoading ? (
-              <div style={{ color: '#9CA3AF' }}>Loading events...</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="skel" style={{ height: 14, borderRadius: 4 }} />
+                ))}
+              </div>
             ) : timeline.length === 0 ? (
-              <div style={{ color: '#9CA3AF', fontSize: '0.875rem' }}>No events recorded for this trip yet.</div>
+              <p className="dim" style={{ fontSize: 12, margin: 0 }}>No events recorded for this trip yet.</p>
             ) : (
-              timeline.map((event, index) => (
-                <div key={event.id} style={{ display: 'flex', gap: '1rem' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#60A5FA', marginTop: '4px' }}></div>
-                    {index < timeline.length - 1 && <div style={{ width: '2px', flex: 1, backgroundColor: '#374151', marginTop: '4px' }}></div>}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.875rem', fontWeight: '500', color: 'white' }}>{event.message}</div>
-                    <div style={{ fontSize: '0.75rem', color: '#9CA3AF', marginTop: '0.25rem' }}>
-                      {format(new Date(event.timestamp), 'h:mm a')} - {event.actor}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {timeline.map((event, index) => (
+                  <div key={event.id} style={{ display: 'flex', gap: 12 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ink-2)', marginTop: 3 }} />
+                      {index < timeline.length - 1 && (
+                        <div style={{ width: 1, flex: 1, background: 'var(--divider)', minHeight: 14, marginTop: 4 }} />
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.45 }}>{event.message}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                        {format(new Date(event.timestamp), 'h:mm a')} · {event.actor}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
         </div>

@@ -3,11 +3,22 @@ import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-na
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { colors, spacing, typography } from '../../constants/theme';
+import { typography } from '../../constants/theme';
 import { EmptyState } from '../../components/shared/EmptyState';
 import { RouteStopsLoadingSkeleton } from '../../components/shared/LoadingState';
 import { ScreenErrorState } from '../../components/shared/ScreenErrorState';
 import { driverService } from '../../services/driver.service';
+
+const C = {
+  bg: '#BFE6FF',
+  ink: '#1A1A1C',
+  muted: '#565656',
+  ghost: '#C9C9C9',
+  sep: 'rgba(26, 26, 28, 0.07)',
+  badge: '#356C8F',
+  badgeText: '#FFFFFF',
+  link: '#356C8F',
+};
 
 export default function RoutePreviewScreen() {
   const router = useRouter();
@@ -22,12 +33,12 @@ export default function RoutePreviewScreen() {
   });
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.back}>Back</Text>
+    <SafeAreaView style={s.container}>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7}>
+          <Text style={s.back}>← Back</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Route Stops</Text>
+        <Text style={s.title}>Route Stops</Text>
       </View>
 
       {isLoading ? <RouteStopsLoadingSkeleton /> : null}
@@ -53,15 +64,18 @@ export default function RoutePreviewScreen() {
           estimatedItemSize={64}
           keyExtractor={(item) => item.id}
           removeClippedSubviews={data.length > 20}
-          contentContainerStyle={{ padding: spacing.xl }}
+          contentContainerStyle={{ paddingHorizontal: 28, paddingTop: 16, paddingBottom: 40 }}
           renderItem={({ item, index }) => (
-            <View style={styles.row}>
-              <View style={styles.orderBadge}>
-                <Text style={styles.orderText}>{index + 1}</Text>
+            <View style={s.row}>
+              <View style={s.badgeCol}>
+                <View style={s.badge}>
+                  <Text style={s.badgeText}>{index + 1}</Text>
+                </View>
+                {index < data.length - 1 && <View style={s.connector} />}
               </View>
-              <View style={styles.rowBody}>
-                <Text style={styles.stopName}>{item.name}</Text>
-                <Text style={styles.stopStudents}>{item.studentCount} students</Text>
+              <View style={s.rowBody}>
+                <Text style={s.stopName}>{item.name}</Text>
+                <Text style={s.stopMeta}>{item.studentCount} students</Text>
               </View>
             </View>
           )}
@@ -71,62 +85,79 @@ export default function RoutePreviewScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: C.bg,
   },
   header: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
+    paddingHorizontal: 28,
+    paddingTop: 20,
+    paddingBottom: 16,
+    gap: 10,
   },
   back: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    color: colors.brand.primary,
-    marginBottom: spacing.md,
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.link,
   },
   title: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.h1,
-    fontWeight: typography.weights.bold,
-    color: colors.text.primary,
+    fontSize: 26,
+    fontWeight: '700',
+    color: C.ink,
+    letterSpacing: -0.5,
   },
+
+  // Timeline row
   row: {
     flexDirection: 'row',
+    paddingBottom: 0,
+    minHeight: 64,
+  },
+  badgeCol: {
     alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.card.border,
+    width: 36,
+    marginRight: 14,
   },
-  rowBody: {
-    flex: 1,
-    marginLeft: spacing.sm,
-  },
-  orderBadge: {
+  badge: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.brand.light,
+    backgroundColor: C.badge,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  orderText: {
+  badgeText: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.small,
-    fontWeight: typography.weights.bold,
-    color: colors.brand.primary,
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.badgeText,
+  },
+  connector: {
+    flex: 1,
+    width: 1,
+    backgroundColor: C.sep,
+    marginTop: 4,
+    marginBottom: 4,
+    minHeight: 24,
+  },
+  rowBody: {
+    flex: 1,
+    paddingBottom: 20,
+    paddingTop: 4,
   },
   stopName: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.body,
-    fontWeight: typography.weights.medium,
-    color: colors.text.primary,
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.ink,
   },
-  stopStudents: {
+  stopMeta: {
     fontFamily: typography.family,
-    fontSize: typography.sizes.micro,
-    color: colors.text.muted,
+    fontSize: 12,
+    color: C.muted,
     marginTop: 2,
   },
 });

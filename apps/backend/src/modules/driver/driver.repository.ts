@@ -25,7 +25,7 @@ export async function getDriverActiveTrip(driverId: string) {
           select: { id: true, number: true },
         },
         route: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, area: true },
         },
       },
       orderBy: { createdAt: 'desc' },

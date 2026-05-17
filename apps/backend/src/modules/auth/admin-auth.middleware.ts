@@ -18,6 +18,7 @@ import {
 } from './admin-anomaly.service'
 import { extractAdminFingerprintFromHeaders, syncAdminFingerprint } from './admin-fingerprint.service'
 import { consumeAdminStepUpToken } from './admin-auth.service'
+import { resolveActor } from '../../spine/auth'
 
 export const requireAdminAuth = async (
   req: FastifyRequest,
@@ -147,11 +148,13 @@ export const requireAdminAuth = async (
 
   ensureAdminCsrfCookie(req, reply)
 
-  req.user = {
+  const authedAdmin = {
     ...payload,
     role: authState.role as AdminRole,
     userId: payload.sub,
   }
+  req.user = authedAdmin
+  req.actor = await resolveActor(req, authedAdmin, 'admin')
 }
 
 // Admin role guard

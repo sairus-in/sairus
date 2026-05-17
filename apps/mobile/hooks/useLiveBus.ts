@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { features } from '../lib/config';
+import { useAuthStore } from '../store/auth.store';
 import { database, off, onValue, ref } from '../lib/firebase';
 
 export interface BusLocation {
@@ -12,6 +13,8 @@ export interface BusLocation {
   heading: number;
   gpsStatus: 'LIVE' | 'STALE' | 'OFFLINE' | 'UNKNOWN';
   lastUpdated: number;
+  etaMin?: number | null;
+  distanceRemainingM?: number | null;
 }
 
 const BusLocationSchema = z.object({
@@ -21,6 +24,8 @@ const BusLocationSchema = z.object({
   heading: z.number(),
   gpsStatus: z.enum(['LIVE', 'STALE', 'OFFLINE', 'UNKNOWN']),
   lastUpdated: z.number().int().nonnegative(),
+  etaMin: z.number().nullable().optional(),
+  distanceRemainingM: z.number().nullable().optional(),
 });
 
 const busLocationKey = (busId: string) => ['bus-location', busId] as const;
@@ -28,6 +33,7 @@ const busLocationKey = (busId: string) => ['bus-location', busId] as const;
 export function useLiveBus(busId: string | null) {
   const queryClient = useQueryClient();
   const [listenerError, setListenerError] = useState<Error | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const prevBusIdRef = useRef<string | null>(null);
   const listenerRef = useRef<(() => void) | null>(null);
 
@@ -45,6 +51,22 @@ export function useLiveBus(busId: string | null) {
     retry: false,
     networkMode: 'offlineFirst',
   });
+
+  // DEV ONLY: inject a static fake bus position so the map renders without Firebase.
+  useEffect(() => {
+    if (!__DEV__ || !busId) return;
+    const token = useAuthStore.getState().token;
+    if (!token?.startsWith('dev_token_')) return;
+
+    queryClient.setQueryData<BusLocation | null>(busLocationKey(busId), {
+      lat:         12.9716,
+      lon:         77.5946,
+      speed:       35,
+      heading:     90,
+      gpsStatus:   'LIVE',
+      lastUpdated: Date.now(),
+    });
+  }, [busId, queryClient]);
 
   useEffect(() => {
     const detachListener = () => {
@@ -125,6 +147,11 @@ export function useLiveBus(busId: string | null) {
     };
   }, [busId, queryClient]);
 
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 10_000);
+    return () => clearInterval(interval);
+  }, []);
+
   const busLocation = busId
     ? (
         busLocationQuery.data
@@ -134,7 +161,7 @@ export function useLiveBus(busId: string | null) {
     : null;
 
   const secondsSincePing = busLocation
-    ? (Date.now() - busLocation.lastUpdated) / 1000
+    ? (nowMs - busLocation.lastUpdated) / 1000
     : Number.POSITIVE_INFINITY;
 
   const rawStatus: BusLocation['gpsStatus'] =
@@ -171,7 +198,7 @@ export function useLiveBus(busId: string | null) {
     }
 
     if (busLocation) {
-      const minutesAgo = Math.floor((Date.now() - busLocation.lastUpdated) / 60000);
+      const minutesAgo = Math.max(1, Math.floor((nowMs - busLocation.lastUpdated) / 60000));
       return {
         markerOpacity: 0.4,
         markerPulse: false,

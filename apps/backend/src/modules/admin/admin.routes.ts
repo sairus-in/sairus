@@ -3,20 +3,18 @@ import { adminService } from './admin.service';
 import { reportsService } from './reports.service';
 import { requireAdminAuth, requireAdminStepUp } from '../auth/admin-auth.middleware';
 import { adminRoute } from '../../middleware/route-guards';
-import { attendanceService } from '../attendance/attendance.service';
-import { importService } from '../import/import.service';
 import { getAdminAccessContext, assertAdminAction } from '../../lib/admin-access';
 import { invalidateAdminAuthCache } from '../../lib/auth-cache';
 import { writeAuthAuditEvent, hashForLog } from '../../lib/auth-audit';
 import { revokeAdminAuthState } from '../../lib/auth-state-change';
 import { sendInviteEmail } from '../../lib/email';
 import { AppError } from '../../lib/errors';
+import { checkAdminInviteRateLimit } from '../../lib/rate-limit';
 import { ok, okList, buildPagination, AuthAuditEventType } from 'shared';
 import { serializeImportSessionDetail, serializeImportSessionSummary } from './admin.serializers';
 import { AdminAction } from 'shared';
 import * as crypto from 'crypto';
 import * as z from 'zod';
-import * as adminAuthRepository from '../auth/admin-auth.repository';
 
 const messageSchema = z.object({
   body: z.string().min(1).max(1000),
@@ -127,6 +125,34 @@ const unsuspendAdminBodySchema = z.object({
   reason: z.string().trim().max(500).optional().nullable(),
 });
 
+const activeTripsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+const correctionsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+const incidentsQuerySchema = z.object({
+  status: z.enum(['REPORTED', 'ASSIGNED', 'RESOLVED', 'CANCELLED']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+const gpsOutageCorrectionsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+const messageQuerySchema = z.object({
+  busId: z.string().cuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  contextType: z.string().trim().min(1).max(50).optional(),
+  contextId: z.string().trim().min(1).max(120).optional(),
+});
+
 export async function adminRoutes(app: FastifyInstance) {
   // All administrative routes require JWT auth and specific clearance logic
   app.addHook('onRequest', requireAdminAuth);
@@ -145,7 +171,7 @@ export async function adminRoutes(app: FastifyInstance) {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
     await requireAction(request, 'INVITE_ADMIN');
-    const admins = await adminAuthRepository.listAdminUsersForManagement();
+    const admins = await adminService.listAdminUsersForManagement();
 
     return reply.send(okList(
       admins.map((admin) => ({
@@ -175,12 +201,13 @@ export async function adminRoutes(app: FastifyInstance) {
     preHandler: [...adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']), requireAdminStepUp]
   }, async (request, reply) => {
     const access = await requireAction(request, 'INVITE_ADMIN');
+    await checkAdminInviteRateLimit(request.ip);
     const parsed = adminUserBodySchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    const existingAdmin = await adminAuthRepository.findAdminByEmail(parsed.data.email);
+    const existingAdmin = await adminService.findAdminByEmail(parsed.data.email);
     if (existingAdmin) {
       throw new AppError(409, 'RESOURCE_CONFLICT');
     }
@@ -189,9 +216,9 @@ export async function adminRoutes(app: FastifyInstance) {
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
     const actorId = request.user!.sub;
-    const passwordHash = await adminAuthRepository.hashPassword(crypto.randomBytes(32).toString('hex'));
+    const passwordHash = await adminService.hashPassword(crypto.randomBytes(32).toString('hex'));
 
-    const admin = await adminAuthRepository.createAdminInvite({
+    const admin = await adminService.createAdminInvite({
       email: parsed.data.email.toLowerCase().trim(),
       name: parsed.data.name,
       role: parsed.data.role,
@@ -253,7 +280,7 @@ export async function adminRoutes(app: FastifyInstance) {
         ? null
         : parsed.data.department;
 
-    const updatedAdmin = await adminAuthRepository.updateAdminProfileAndScopes({
+    const updatedAdmin = await adminService.updateAdminProfileAndScopes({
       adminId: params.data.id,
       name: parsed.data.name,
       role: parsed.data.role,
@@ -365,7 +392,7 @@ export async function adminRoutes(app: FastifyInstance) {
       throw new AppError('You cannot suspend your own administrator account.', 409, 'RESOURCE_CONFLICT');
     }
 
-    const suspendedAdmin = await adminAuthRepository.suspendAdminUser({
+    const suspendedAdmin = await adminService.suspendAdminUser({
       adminId: params.data.id,
       suspendedBy: request.user!.sub,
       reason: parsed.data.reason,
@@ -407,7 +434,7 @@ export async function adminRoutes(app: FastifyInstance) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    const unsuspendedAdmin = await adminAuthRepository.unsuspendAdminUser({
+    const unsuspendedAdmin = await adminService.unsuspendAdminUser({
       adminId: params.data.id,
       unsuspendedBy: request.user!.sub,
       reason: parsed.data.reason ?? null,
@@ -467,8 +494,13 @@ export async function adminRoutes(app: FastifyInstance) {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
     const access = await requireAction(request, 'VIEW_COMMAND_CENTER');
-    const data = await adminService.getActiveTrips(access);
-    return reply.send(ok(data, request.id));
+    const parsed = activeTripsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
+    }
+    const { page, limit } = parsed.data;
+    const result = await adminService.getActiveTrips(access, { page, limit });
+    return reply.send(okList(result.trips, buildPagination(page, limit, result.total), request.id));
   });
 
   app.get('/active-trips', {
@@ -508,9 +540,13 @@ export async function adminRoutes(app: FastifyInstance) {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
     const access = await requireAction(request, 'REVIEW_CORRECTIONS');
-    const data = await adminService.getPendingCorrections(access);
-    const itemCount = Array.isArray(data) ? data.length : (data as any)?.length ?? 0;
-    return reply.send(okList(data as any[], buildPagination(1, 100, itemCount), request.id));
+    const parsed = correctionsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
+    }
+    const { page, limit } = parsed.data;
+    const result = await adminService.getPendingCorrections(access, { page, limit });
+    return reply.send(okList(result.corrections, buildPagination(page, limit, result.total), request.id));
   });
 
   app.post<{ Params: { id: string }, Body: { status: 'APPROVED' | 'REJECTED' } }>('/corrections/:id/resolve', {
@@ -564,8 +600,7 @@ export async function adminRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const access = await requireAction(request, 'VIEW_TRIP_DETAIL');
     const data = await adminService.getTripStudents(request.params.id, access);
-    const itemCount = Array.isArray(data) ? data.length : (data as any)?.length ?? 0;
-    return reply.send(okList(data as any[], buildPagination(1, itemCount, itemCount), request.id));
+    return reply.send(ok(data, request.id));
   });
 
   app.get<{ Params: { id: string } }>('/trips/:id/timeline', {
@@ -573,16 +608,20 @@ export async function adminRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const access = await requireAction(request, 'VIEW_TRIP_DETAIL');
     const data = await adminService.getTripTimeline(request.params.id, access);
-    const itemCount = Array.isArray(data) ? data.length : (data as any)?.length ?? 0;
-    return reply.send(okList(data as any[], buildPagination(1, itemCount, itemCount), request.id));
+    return reply.send(ok(data, request.id));
   });
 
   app.get<{ Querystring: { status?: string } }>('/incidents', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
     const access = await requireAction(request, 'VIEW_INCIDENTS');
-    const data = await adminService.getIncidents(request.query.status, access);
-    return reply.send(okList(data, buildPagination(1, data.length, data.length), request.id));
+    const parsed = incidentsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
+    }
+    const { status, page, limit } = parsed.data;
+    const result = await adminService.getIncidents(status, access, { page, limit });
+    return reply.send(okList(result.incidents, buildPagination(page, limit, result.total), request.id));
   });
 
   app.patch<{ Params: { id: string } }>('/incidents/:id/resolve', {
@@ -633,13 +672,12 @@ export async function adminRoutes(app: FastifyInstance) {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
     const access = await requireAction(request, 'VIEW_MESSAGES');
-    const data = await adminService.getMessages({
-      busId: request.query.busId,
-      limit: request.query.limit,
-      contextType: request.query.contextType,
-      contextId: request.query.contextId,
-    }, access);
-    return reply.send(okList(data, buildPagination(1, data.length, data.length), request.id));
+    const parsed = messageQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
+    }
+    const data = await adminService.getMessages(parsed.data, access);
+    return reply.send(ok(data, request.id));
   });
 
   app.post('/messages', {
@@ -752,14 +790,14 @@ export async function adminRoutes(app: FastifyInstance) {
       orderBy: { startedAt: 'desc' },
       take: 50
     });
-    return reply.send(okList(sessions.map(serializeImportSessionSummary), buildPagination(1, 50, sessions.length), request.id));
+    return reply.send(ok(sessions.map(serializeImportSessionSummary), request.id));
   });
 
   app.get<{ Params: { id: string } }>('/ops/import-sessions/:id', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
     await requireAction(request, 'VIEW_IMPORT_SESSIONS');
-    const session = await importService.getImportSessionDetail(request.params.id);
+    const session = await adminService.getImportSessionDetail(request.params.id);
     if (!session) {
       throw new AppError(404, 'IMPORT_SESSION_NOT_FOUND');
     }
@@ -771,7 +809,7 @@ export async function adminRoutes(app: FastifyInstance) {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
     await requireAction(request, 'RETRY_IMPORT_ROWS');
-    const result = await importService.retryFailedRows(request.params.id, request.user!.sub);
+    const result = await adminService.retryImport(request.params.id, request.user!.sub);
     return reply.send(ok(result, request.id));
   });
 
@@ -863,16 +901,20 @@ export async function adminRoutes(app: FastifyInstance) {
   }, async (request, reply) => {
     const access = await requireAction(request, 'REVIEW_GPS_OUTAGE');
     const data = await adminService.getGpsOutageQueue(access);
-    const itemCount = Array.isArray(data) ? data.length : (data as any)?.length ?? 0;
-    return reply.send(okList(data as unknown as any[], buildPagination(1, itemCount, itemCount), request.id));
+    return reply.send(ok(data, request.id));
   });
 
   app.get('/ops/gps-outage-corrections', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
     const access = await requireAction(request, 'REVIEW_GPS_OUTAGE');
-    const data = await adminService.getGpsOutageCorrections(access);
-    return reply.send(okList(data, buildPagination(1, data.length, data.length), request.id));
+    const parsed = gpsOutageCorrectionsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
+    }
+    const { page, limit } = parsed.data;
+    const result = await adminService.getGpsOutageCorrections(access, { page, limit });
+    return reply.send(okList(result.corrections, buildPagination(page, limit, result.total), request.id));
   });
 
   app.post<{ Params: { tripId: string } }>('/ops/gps-outages/:tripId/coordinator-override', {
@@ -885,7 +927,7 @@ export async function adminRoutes(app: FastifyInstance) {
     }
 
     await adminService.assertTripAccess(parsed.data.tripId, 'COORDINATOR_OVERRIDE', access);
-    const result = await attendanceService.coordinatorMarkAllPresent(parsed.data.tripId, request.user!.sub, {
+    const result = await adminService.coordinatorMarkAllPresent(parsed.data.tripId, request.user!.sub, {
       actorType: 'ADMIN_USER',
       actorId: request.user!.sub,
       routeIds: access.scope.routeIds,

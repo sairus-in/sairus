@@ -1,11 +1,23 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
-import { env } from '../lib/env';
+import { env, isProduction } from '../lib/env';
 
 const oauthClient = new OAuth2Client();
 
 export const verifyCloudTask = async (req: FastifyRequest, reply: FastifyReply) => {
+  const taskSecret = req.headers['x-cloud-tasks-secret'];
+  const configuredSecret = env.CLOUD_TASKS_SECRET;
+
+  if (configuredSecret && taskSecret !== configuredSecret) {
+    reply.code(403).send({ error: 'FORBIDDEN', reason: 'Invalid task secret' });
+    return;
+  }
+
   const authHeader = req.headers.authorization as string | undefined;
+
+  if (!isProduction && !authHeader) {
+    return;
+  }
 
   if (!authHeader?.startsWith('Bearer ')) {
     reply.code(403).send({ error: 'FORBIDDEN', reason: 'Missing auth token' });

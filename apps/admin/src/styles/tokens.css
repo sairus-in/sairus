@@ -1,0 +1,65 @@
+:root {
+  --bg: #fafaf7;
+  --surface: #ffffff;
+  --surface-2: #f5f5f2;
+  --surface-3: #efeee9;
+  --ink: #1a1a1c;
+  --ink-2: #3a3a3d;
+  --muted: #8a8a8f;
+  --muted-2: #b5b5b8;
+
+  --border: #e8e6df;
+  --border-2: #dedbd2;
+  --border-3: #c9c6bc;
+  --divider: #ececea;
+
+  --ok: #3a7a5a;
+  --ok-soft: #e8efe9;
+  --warn: #a87437;
+  --warn-soft: #f3ebdc;
+  --err: #a6423a;
+  --err-soft: #f4e1df;
+  --info: #3f5a7a;
+  --info-soft: #e2e8ef;
+  --idle: #8a8a8f;
+  --idle-soft: #ececea;
+
+  --p1: #a6423a;
+  --p2: #a87437;
+  --p3: #3f5a7a;
+
+  --accent: #1a1a1c;
+  --accent-ink: #fafaf7;
+
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-2xl: 28px;
+  --r-pill: 999px;
+
+  --rail: 56px;
+  --topbar: 52px;
+  --statusbar: 32px;
+  --right-rail: 320px;
+
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+
+  --font-display: 'Inter Tight', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  --font-text: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms;
+  --t: 200ms;
+  --t-slow: 360ms;
+}

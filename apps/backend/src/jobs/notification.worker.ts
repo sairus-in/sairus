@@ -7,6 +7,7 @@ import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { runWithRequestContext } from '../lib/correlation';
 import { sendSms } from '../lib/msg91';
+import { circuitExecute } from '../lib/redis-circuit';
 import type { NotificationPayload } from 'shared';
 import type { NotificationJobData } from '../lib/queue';
 
@@ -93,14 +94,28 @@ async function sendExpoPushBatch(tokens: string[], payload: NotificationPayload,
       data,
     }));
 
-    const response = await fetch(expoPushEndpoint, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(messages),
-    });
+    const response = await circuitExecute<Response | null>(
+      async () => fetch(expoPushEndpoint, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(messages),
+      }),
+      'allow_degraded',
+      async () => null,
+      'expo-push',
+    );
+
+    if (!response) {
+      logger.warn({
+        event: 'push_expo_degraded',
+        source: 'SYSTEM',
+        meta: { jobId, tokenCount: tokenChunk.length },
+      });
+      continue;
+    }
 
     if (!response.ok) {
       throw new Error(`Expo push request failed with status ${response.status}`);
@@ -161,6 +176,7 @@ async function sendFcmPushBatch(tokens: string[], payload: NotificationPayload, 
     });
     return [] as string[];
   }
+  const firebase = firebaseAdmin;
 
   const data = {
     ...normalizePushData(payload.metadata),
@@ -173,14 +189,23 @@ async function sendFcmPushBatch(tokens: string[], payload: NotificationPayload, 
     const tokenChunk = tokens.slice(i, i + pushBatchSize);
 
     try {
-      const response = await firebaseAdmin.messaging().sendEachForMulticast({
-        tokens: tokenChunk,
-        notification: {
-          title: payload.title,
-          body: payload.body,
-        },
-        data,
-      });
+      const response = await circuitExecute(
+        async () => firebase.messaging().sendEachForMulticast({
+          tokens: tokenChunk,
+          notification: {
+            title: payload.title,
+            body: payload.body,
+          },
+          data,
+        }),
+        'allow_degraded',
+        async () => ({
+          successCount: 0,
+          failureCount: tokenChunk.length,
+          responses: [],
+        }),
+        'firebase-fcm',
+      );
 
       logger.info({
         event: 'push_fcm_batch_sent',

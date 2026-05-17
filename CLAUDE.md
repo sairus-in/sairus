@@ -1,5 +1,22 @@
 # CLAUDE.md — College Bus Management System
 
+## Code Graph — Query Before Reading Files
+
+This project has a pre-built knowledge graph. **Always query it before opening files.** Only read source files when the graph answer is insufficient.
+
+```bash
+# Query the graph
+python -m graphify query "your question" --graph graphify-out/graph.json --budget 2000
+
+# Explain a specific node (file, function, class)
+python -m graphify explain "ClassName or filename" --graph graphify-out/graph.json
+
+# Shortest path between two concepts
+python -m graphify path "ServiceA" "RepositoryB" --graph graphify-out/graph.json
+```
+
+---
+
 > **Audience.** This file is the standing instruction set for Claude Code and any other AI coding agent working in this repo. It is **policy + codebase explanation**, not status. For what's done vs outstanding, see [`docs/PRODUCTION_READINESS_STATUS.md`](docs/PRODUCTION_READINESS_STATUS.md) and [`docs/PLANNED_NOT_IMPLEMENTED.md`](docs/PLANNED_NOT_IMPLEMENTED.md). For architecture diagrams and data flows, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 >
 > If anything in this file contradicts the code, the code wins — update the file in the same PR.
@@ -103,13 +120,13 @@ These are the rules that must hold across the entire codebase. If a change viola
 | `driver` | `/v1/driver/*` (today-assignment, start-trip, end-trip, trip-summary, route-stops) | routes + service + repo + **serializers** | Serializers shape driver-visible responses. |
 | `trips` | `/v1/trips/*` | routes + service + repo + `delegate.service.ts` | Delegate flow is Redis-heavy — coordinator takes over GPS pings when the driver phone fails. |
 | `attendance` | `/v1/attendance/*` | **Full 4-layer.** Reference implementation. | The `checkIn` method is the canonical 13-step hardened flow. |
-| `gps` | `/v1/gps/ping` | routes + service, **no repo** | Ingests ping → Postgres (buffered), Redis (live state), Firebase RTDB (map projection). |
+| `gps` | `/v1/gps/ping` | routes + service + repo | Ingests ping → Postgres (buffered, via `gps.repository.ts`), Redis (live state), Firebase RTDB (map projection). |
 | `incidents` | `/v1/incidents/*` | routes + service + repo | Cloud-Task-driven escalation at +10 min: COORDINATOR → TRANSPORT_OFFICER → PRINCIPAL. Idempotent. |
 | `notifications` | *(service only, invoked from other modules)* | service, **no routes / no repo** | BullMQ + FCM multicast. Drops tracked in `notifications.service.ts` + `NotificationDrop` table. |
 | `fleet` | `/v1/fleet/*` | routes + service + repo + serializers | Bus CRUD, bus assignments. |
 | `routes` | `/v1/routes/*` | **Full 4-layer + types.** Reference for complex mutations. | Atomic route-stop-change with audit trail. |
 | `users` | `/v1/users/*` | **Full 4-layer + serializers.** Reference for bulk import. | Student assign, FCM token patch, bulk student import (atomic transaction). |
-| `admin` | `/v1/admin/*` live ops, dashboard, alerts, corrections list, messages, reports | routes + service + serializers + `reports.service.ts`, **no repo** | Biggest module by surface area. |
+| `admin` | `/v1/admin/*` live ops, dashboard, alerts, corrections list, messages, reports | routes + service + repo + serializers + `reports.service.ts` | Biggest module by surface area. |
 | `import` | `/v1/import/*` | routes + service + repo | Staff/student CSV ingestion. |
 | `jobs` | `/v1/jobs/*` (Cloud Tasks webhook endpoints) | routes only | **Every job path is idempotent and verifies the `CLOUD_TASKS_SECRET`** before executing. Do not add a job without idempotency. |
 | `qr` | *(no routes — used internally by sockets + attendance)* | service only | Signs per-trip JWTs, stores the nonce in Redis with TTL. |

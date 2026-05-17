@@ -104,3 +104,6 @@ apps/backend/scripts/.phase4-verify-state.json
 scripts/arch-check-output.txt
 scripts/arch-output.md
 scripts/tsc-output.md
+
+# Policy parity baselines — local artifacts, not committed
+apps/backend/scripts/policy-parity/baselines/*.json

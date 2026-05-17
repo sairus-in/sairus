@@ -269,6 +269,94 @@ export async function getEscalationRecipients(
   }
 }
 
+export async function getIncidentByIdForAdmin(incidentId: string) {
+  return await prisma.incident.findUnique({
+    where: { id: incidentId },
+    select: { id: true, tripId: true, routeId: true, busId: true },
+  });
+}
+
+export async function getActiveIncidentsForCommandCenter(routeIds: string[] | null) {
+  return await prisma.incident.findMany({
+    where: {
+      status: { in: ['REPORTED', 'ASSIGNED'] },
+      ...(routeIds ? { trip: { routeId: { in: routeIds } } } : {}),
+    },
+    include: {
+      trip: { select: { id: true, routeId: true, expectedCount: true, driver: { select: { name: true } } } },
+      route: { select: { id: true, name: true } },
+      bus: { select: { number: true, plateNumber: true } },
+      reportedBy: { select: { name: true, role: true } },
+    },
+    orderBy: { reportedAt: 'desc' },
+  });
+}
+
+export async function getIncidentContextForAdmin(incidentId: string) {
+  return await prisma.incident.findUnique({
+    where: { id: incidentId },
+    select: { id: true, busId: true, routeId: true, tripId: true, trip: { select: { routeId: true } } },
+  });
+}
+
+export async function getIncidentsForAdmin(status?: string, routeIds?: string[] | null, pagination?: { page: number; limit: number }) {
+  const whereClause: any = {};
+  if (status) whereClause.status = status;
+  if (routeIds) whereClause.trip = { routeId: { in: routeIds } };
+
+  const [incidents, total] = await Promise.all([
+    prisma.incident.findMany({
+      where: whereClause,
+      include: {
+        trip: { select: { id: true, routeId: true, date: true, expectedCount: true, driver: { select: { name: true } } } },
+        route: { select: { id: true, name: true } },
+        bus: { select: { number: true, plateNumber: true } },
+        reportedBy: { select: { name: true, role: true } },
+        resolvedBy: { select: { name: true } }
+      },
+      orderBy: { reportedAt: 'desc' },
+      skip: pagination ? (pagination.page - 1) * pagination.limit : undefined,
+      take: pagination?.limit,
+    }),
+    pagination ? prisma.incident.count({ where: whereClause }) : Promise.resolve(0),
+  ]);
+
+  return { incidents, total };
+}
+
+export async function getIncidentWithBusAndRoute(incidentId: string) {
+  return await prisma.incident.findUnique({
+    where: { id: incidentId },
+    include: {
+      bus: { select: { number: true } },
+      route: { select: { name: true } },
+      trip: { select: { routeId: true } },
+    },
+  });
+}
+
+export async function updateIncidentEscalationForAdmin(incidentId: string, nextLevel: any, assignedAt: Date) {
+  return await prisma.incident.update({
+    where: { id: incidentId },
+    data: { escalationLevel: nextLevel, status: 'ASSIGNED', assignedAt },
+    include: { bus: { select: { number: true } }, route: { select: { name: true } } },
+  });
+}
+
+export async function assignSubstituteForAdmin(incidentId: string, alternateBusId: string, assignedAt: Date) {
+  return await prisma.incident.update({
+    where: { id: incidentId },
+    data: { status: 'ASSIGNED', assignedAt, alternateBusId },
+  });
+}
+
+export async function resolveIncidentForAdmin(incidentId: string, resolverId: string, resolutionNotes: string) {
+  return await prisma.incident.update({
+    where: { id: incidentId },
+    data: { status: 'RESOLVED', resolvedById: resolverId, resolutionNotes, resolvedAt: new Date() },
+  });
+}
+
 export const incidentsRepository = {
   getTripWithContext,
   createIncident,
@@ -278,4 +366,12 @@ export const incidentsRepository = {
   resolveIncident,
   listIncidents,
   getEscalationRecipients,
+  getIncidentByIdForAdmin,
+  getActiveIncidentsForCommandCenter,
+  getIncidentContextForAdmin,
+  getIncidentsForAdmin,
+  getIncidentWithBusAndRoute,
+  updateIncidentEscalationForAdmin,
+  assignSubstituteForAdmin,
+  resolveIncidentForAdmin,
 };

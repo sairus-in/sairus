@@ -1,90 +1,118 @@
-import React, { useState } from 'react';
-import { useCorrections } from '../../hooks/useCorrections';
-import { CorrectionCard } from '../../components/ops/CorrectionCard';
+import React, { useMemo, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { User } from 'lucide-react';
+import { CorrectionCard } from '../../components/ops/CorrectionCard';
+import { KPIBlock, PriorityChip, SectionCard } from '../../components/design/primitives';
+import { useCorrections } from '../../hooks/useCorrections';
 
 export const Corrections: React.FC = () => {
   const { data: corrections = [], isLoading } = useCorrections();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedCorrection = useMemo(
+    () => corrections.find((correction) => correction.id === selectedId) ?? corrections[0] ?? null,
+    [corrections, selectedId],
+  );
 
-  const selectedCorrection = corrections.find(c => c.id === selectedId);
-
-  if (isLoading) {
-    return <div style={{ color: '#9CA3AF' }}>Loading correction queue...</div>;
-  }
+  const gpsRelated = corrections.filter((correction) => /gps|offline/i.test(correction.reason)).length;
+  const staleQueue = corrections.filter((correction) => {
+    const ageMs = Date.now() - new Date(correction.createdAt).getTime();
+    return ageMs > 15 * 60 * 1000;
+  }).length;
 
   return (
-    <div style={{ display: 'flex', gap: '2rem', height: 'calc(100vh - 8rem)' }}>
-      
-      {/* LEFT PANEL: Queue Table */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#1F2937', borderRadius: '0.75rem', border: '1px solid #374151', overflow: 'hidden' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid #374151' }}>
-          <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 'bold', color: 'white' }}>Correction Queue</h1>
-          <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.875rem', color: '#9CA3AF' }}>{corrections.length} pending requests</p>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {corrections.length === 0 ? (
-            <div style={{ padding: '3rem', textAlign: 'center', color: '#9CA3AF' }}>
-              No pending corrections. Queue is clear!
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {corrections.map(correction => (
-                <div 
-                  key={correction.id}
-                  onClick={() => setSelectedId(correction.id)}
-                  style={{
-                    padding: '1rem 1.5rem',
-                    borderBottom: '1px solid #374151',
-                    cursor: 'pointer',
-                    backgroundColor: selectedId === correction.id ? '#374151' : 'transparent',
-                    transition: 'background-color 0.2s'
-                  }}
-                  className="hover:bg-gray-700"
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'white', fontWeight: '500' }}>
-                      <User size={16} />
-                      {correction.attendance.user.name}
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>
-                      {formatDistanceToNow(new Date(correction.createdAt))} ago
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.875rem', color: '#9CA3AF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {correction.reason}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* RIGHT PANEL: Details & Mutation */}
-      <div style={{ flex: 1 }}>
-        {selectedCorrection ? (
-          <CorrectionCard 
-            correction={selectedCorrection} 
-            onClose={() => setSelectedId(null)} 
-          />
-        ) : (
-          <div style={{ 
-            height: '100%', 
-            border: '2px dashed #374151', 
-            borderRadius: '0.75rem', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            color: '#6B7280'
-          }}>
-            Select a correction from the queue to review
+    <div style={{ display: 'grid', gap: 16, minHeight: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 16,
+          alignItems: 'flex-start',
+          padding: 20,
+          border: '1px solid var(--border)',
+          borderRadius: 20,
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,245,242,0.9))',
+        }}
+      >
+        <div>
+          <div className="mono" style={{ color: 'var(--muted)', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>
+            Review Queue
           </div>
-        )}
+          <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 500, letterSpacing: '-0.03em' }}>
+            Corrections
+          </h1>
+          <div style={{ marginTop: 6, color: 'var(--muted)', maxWidth: 760 }}>
+            Review attendance correction requests without changing the correction approval contract or queue polling behavior.
+          </div>
+        </div>
       </div>
 
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+        <KPIBlock label="Pending" value={corrections.length} sub="Requests waiting for decision" spark={[1, 2, 2, 3, Math.max(corrections.length, 1)]} />
+        <KPIBlock label="GPS Related" value={gpsRelated} sub="Outage or offline evidence disputes" accent="var(--warn)" spark={[0, 1, 1, 2, Math.max(gpsRelated, 1)]} />
+        <KPIBlock label="Stale Queue" value={staleQueue} sub="Waiting more than 15 minutes" accent="var(--err)" spark={[0, 0, 1, 1, Math.max(staleQueue, 1)]} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '360px minmax(0, 1fr)', gap: 16, minHeight: 0 }}>
+        <SectionCard title="Correction Queue" subtitle={isLoading ? 'Loading queue' : `${corrections.length} pending requests`}>
+          <div className="scroll" style={{ display: 'grid', gap: 8, maxHeight: 'calc(100vh - 390px)', paddingRight: 4 }}>
+            {isLoading ? (
+              <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--muted)' }}>Loading correction queue…</div>
+            ) : corrections.length === 0 ? (
+              <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--muted)' }}>No pending corrections.</div>
+            ) : (
+              corrections.map((correction) => {
+                const active = selectedCorrection?.id === correction.id;
+                const ageMs = Date.now() - new Date(correction.createdAt).getTime();
+                const isGpsRelated = /gps|offline/i.test(correction.reason);
+                const priority: 'p1' | 'p2' | 'p3' = isGpsRelated
+                  ? 'p1'
+                  : ageMs > 15 * 60 * 1000
+                    ? 'p2'
+                    : 'p3';
+                return (
+                  <button
+                    key={correction.id}
+                    type="button"
+                    onClick={() => setSelectedId(correction.id)}
+                    style={{
+                      padding: 14,
+                      borderRadius: 16,
+                      border: `1px solid ${active ? 'var(--ink)' : 'var(--border)'}`,
+                      background: active ? 'var(--surface-2)' : 'var(--surface)',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <PriorityChip level={priority} />
+                        <span style={{ fontWeight: 500 }}>{correction.attendance.user.name}</span>
+                      </div>
+                      <span style={{ color: 'var(--muted)', fontSize: 11 }}>
+                        {formatDistanceToNow(new Date(correction.createdAt))} ago
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.55 }}>
+                      {correction.reason}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title={selectedCorrection ? 'Correction Detail' : 'Correction Detail'}
+          subtitle={selectedCorrection ? 'Review evidence, then approve or reject' : 'Select a correction from the queue'}
+        >
+          {selectedCorrection ? (
+            <CorrectionCard correction={selectedCorrection} onClose={() => setSelectedId(null)} />
+          ) : (
+            <div style={{ padding: '32px 0', color: 'var(--muted)' }}>Select a correction from the queue to review.</div>
+          )}
+        </SectionCard>
+      </div>
     </div>
   );
 };
+
+export default Corrections;

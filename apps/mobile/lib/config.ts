@@ -76,7 +76,7 @@ export const config = {
 } as const;
 
 export const features = {
-  pushNotifications: Boolean(config.projectId),
+  pushNotifications: Boolean(config.firebase.projectId && config.firebase.appId),
   firebaseRealtime: Boolean(
     config.firebase.apiKey
     && config.firebase.projectId

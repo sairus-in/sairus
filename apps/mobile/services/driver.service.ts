@@ -22,6 +22,7 @@ export interface DriverTodayAssignment {
   } | null;
   route: {
     name: string;
+    area?: string;
   } | null;
   expectedStudents: number;
 }

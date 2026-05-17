@@ -114,7 +114,7 @@ export async function startGPSTask(tripId: string, busId: string): Promise<void>
     foregroundService: {
       notificationTitle: `Bus — Trip Active`,
       notificationBody: 'GPS tracking is running',
-      notificationColor: '#1E3A8A',
+      notificationColor: '#356C8F',
     },
     pausesUpdatesAutomatically: false,
     activityType: Location.ActivityType.AutomotiveNavigation,

@@ -1,15 +1,3 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-* {
-  box-sizing: border-box;
-}
+/* index.css — Google Fonts import for the FleetOps design system.
+   No Tailwind — the system is built on custom CSS variables. */
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap');

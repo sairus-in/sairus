@@ -4,9 +4,9 @@
 export const colors = {
   // Brand
   brand: {
-    primary: '#1E3A8A',
-    light: '#EEF2FF',
-    mid: '#4F46E5',
+    primary: '#356C8F',
+    light: '#BFE6FF',
+    mid: '#4D95C3',
   },
 
   // Semantic status
@@ -19,15 +19,15 @@ export const colors = {
   // Buttons
   button: {
     primary: { bg: '#1a1a1a', text: '#FFFFFF' },
-    brand: { bg: '#1E3A8A', text: '#FFFFFF' },
+    brand: { bg: '#356C8F', text: '#FFFFFF' },
     destructive: { bg: '#DC2626', text: '#FFFFFF' },
     outline: { bg: 'transparent', border: '#E2E8F0', text: '#374151' },
-    ghost: { text: '#1E3A8A' },
+    ghost: { text: '#356C8F' },
   },
 
   // Surface
   surface: '#FAFAF8',
-  card: { bg: '#FFFFFF', border: '#F0EDE6' },
+  card: { bg: '#FFFFFF', border: '#E9E9E9' },
 
   // Text
   text: {
@@ -38,7 +38,7 @@ export const colors = {
 
   // Tab bar
   tab: {
-    active: '#1E3A8A',
+    active: '#356C8F',
     inactive: '#9CA3AF',
     bg: '#FFFFFF',
     border: '#F3F4F6',
@@ -52,7 +52,7 @@ export const colors = {
     textPrimary: '#FFFFFF',
     textSecondary: '#888888',
     textMuted: '#555555',
-    accent: '#6366F1',
+    accent: '#5CB5EF',
   },
 
   // Base — use these instead of hardcoding '#FFFFFF' / '#000000'
@@ -112,4 +112,106 @@ export const statusPill = {
   EXCUSED: { bg: colors.info.bg, text: colors.info.text },
   OFFLINE: { bg: colors.warning.bg, text: colors.warning.text },
   NOT_STARTED: { bg: colors.neutral.bg, text: colors.neutral.text },
+} as const;
+
+// Student app extended palette (sourced from home-screen brand.ts blue family)
+export const student = {
+  // Backgrounds
+  bg: '#BFE6FF', // Light blue canvas (was warm cream)
+  cardBg: '#FFFFFF',
+  sheetSecondaryBg: '#BFE6FF',
+
+  // Text
+  textInk: '#1A1A1C',
+  textMuted: '#565656',
+  textGhost: '#C9C9C9',
+
+  // Brand accents
+  primary: '#356C8F', // Brand blue (was dark warm brown)
+  primaryText: '#FFFFFF',
+
+  // Status colors
+  successBg: '#E8F5E9',
+  successText: '#2E7D32',
+  warningBg: '#FFF3E0',
+  warningText: '#E65100',
+  errorBg: '#FCE4EC',
+  errorText: '#C62828',
+
+  // Borders
+  border: '#E9E9E9',
+
+  // Icon backgrounds
+  iconWrapBg: '#BFE6FF',
+  iconWrapBgAlt: '#BFE6FF',
+  iconMuted: '#356C8F',
+  iconAlert: '#D84315',
+
+  // Avatar
+  avatarBg: '#FFFFFF',
+
+  // Map specific
+  mapBg: '#F3EFE6',
+  busMarkerBg: '#356C8F',
+} as const;
+
+export const login = {
+  bg: student.bg,
+  iconBg: student.textInk,
+  iconFg: student.primaryText,
+  heading: student.textInk,
+  subtitle: student.textMuted,
+  inputBg: student.cardBg,
+  inputBorder: student.border,
+  inputBorderFocus: '#356C8F',
+  inputText: student.textInk,
+  inputPlaceholder: student.textGhost,
+  prefixText: '#3A3A3D',
+  prefixDivider: student.border,
+  buttonBg: student.primary,
+  buttonText: student.primaryText,
+  buttonDisabledBg: student.primary,
+  footerText: student.textMuted,
+  footerLink: student.textInk,
+  errorText: '#A6423A',
+  errorBg: '#F4E1DF',
+} as const;
+
+// Animation timing tokens (based on ui-ux-pro-max guidelines)
+export const motion = {
+  // Micro-interactions (150-300ms)
+  duration: {
+    fastest: 150,
+    fast: 200,
+    normal: 300,
+    slow: 400,
+  },
+  // Easing curves
+  easing: {
+    enter: 'ease-out',
+    exit: 'ease-in',
+    spring: 'spring',
+  },
+} as const;
+
+// Touch target standards (44pt minimum per ui-ux-pro-max)
+export const touch = {
+  minSize: 44,
+  feedbackOpacity: 0.7, // Standard activeOpacity
+  feedbackScale: 0.95,
+} as const;
+
+// Spacing extended scale (supplements base spacing)
+export const spacingExtended = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  '2xl': 24,
+  '3xl': 28,
+  '4xl': 32,
+  screen: 20, // Standard screen horizontal padding
+  card: 16, // Standard card padding
+  section: 24, // Section spacing
 } as const;

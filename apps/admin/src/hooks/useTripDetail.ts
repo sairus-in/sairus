@@ -20,15 +20,19 @@ export const useTripLive = (tripId: string) => {
 export const useTripStudents = (tripId: string) => {
   return useQuery({
     queryKey: tripStudentsKey(tripId),
-    queryFn: (): Promise<TripStudent[]> => api.get<TripStudent[]>(`/v1/admin/trips/${tripId}/students`),
-    staleTime: 60_000, 
+    queryFn: async (): Promise<TripStudent[]> => {
+      return api.get<TripStudent[]>(`/v1/admin/trips/${tripId}/students`);
+    },
+    staleTime: 60_000,
   });
 };
 
 export const useTripTimeline = (tripId: string) => {
   return useQuery({
     queryKey: tripTimelineKey(tripId),
-    queryFn: (): Promise<TripTimelineEvent[]> => api.get<TripTimelineEvent[]>(`/v1/admin/trips/${tripId}/timeline`),
+    queryFn: async (): Promise<TripTimelineEvent[]> => {
+      return api.get<TripTimelineEvent[]>(`/v1/admin/trips/${tripId}/timeline`);
+    },
     staleTime: 30_000,
   });
 };

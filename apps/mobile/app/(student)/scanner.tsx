@@ -1,29 +1,77 @@
-// app/(student)/scanner.tsx — QR Scanner (full screen, no tab bar)
-// HARDENED v3:
-//   - GPS accuracy threshold guard before scan fires (> 150m = low-trust warn)
-//   - isOptimistic lock check prevents double-scan while server is in-flight
-//   - Camera permission: guides to Settings after permanent denial
-//   - try/catch on mutateAsync prevents screen hanging on throw
-//   - All colors from theme tokens (no hardcoded hex)
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Linking,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Linking, Dimensions } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
+import Svg, { Path, Defs, Mask, Rect } from 'react-native-svg';
+import * as Haptics from 'expo-haptics';
+
 import { useCheckin } from '../../hooks/useCheckin';
 import { useStudentHome } from '../../hooks/useStudentHome';
 import { useAuth } from '../../store/auth.store';
-import { colors, typography, spacing, radii } from '../../constants/theme';
+import { typography, spacingExtended } from '../../constants/theme';
 import { t } from '../../i18n';
-import * as Haptics from 'expo-haptics';
 import { analytics } from '../../lib/analytics';
 import { ScreenErrorBoundary } from '../../components/shared/ScreenErrorBoundary';
 
-// GPS accuracy threshold — above this we submit as low-trust
+const { width, height } = Dimensions.get('window');
+
+// ── Design Tokens ──
+const ds = {
+  bg: '#1A1A1C',
+  cardBg: '#FFFFFF',
+  textInk: '#1A1A1C',
+  textMuted: '#565656',
+  dangerBg: '#FCE4EC',
+  dangerText: '#C62828',
+  warningBg: '#FFF3E0',
+  warningText: '#E65100',
+  primary: '#356C8F',
+};
+
 const LOW_TRUST_ACCURACY_THRESHOLD_M = 150;
+
+const BackIcon = ({ color = '#FFFFFF' }) => (
+  <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+    <Path d="M19 12H5M5 12l7-7M5 12l7 7" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+const LocationWarnIcon = ({ color = ds.warningText }) => (
+  <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+    <Path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M12 9v4M12 17h.01" stroke={color} strokeWidth={2} strokeLinecap="round" />
+  </Svg>
+);
+
+// Draws the translucent dark overlay with a transparent hole in the middle
+const CameraOverlay = () => {
+  const holeSize = 260;
+  const cx = width / 2;
+  const cy = height * 0.4;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Svg width="100%" height="100%">
+        <Defs>
+          <Mask id="mask">
+            <Rect width="100%" height="100%" fill="white" />
+            <Rect x={cx - holeSize/2} y={cy - holeSize/2} width={holeSize} height={holeSize} rx="32" fill="black" />
+          </Mask>
+        </Defs>
+        <Rect width="100%" height="100%" fill="rgba(0,0,0,0.6)" mask="url(#mask)" />
+        {/* Reticle Brackets */}
+        <Path d={`M ${cx - holeSize/2} ${cy - holeSize/2 + 30} v -10 a 20 20 0 0 1 20 -20 h 10`} stroke="#FFFFFF" strokeWidth={4} fill="none" />
+        <Path d={`M ${cx + holeSize/2} ${cy - holeSize/2 + 30} v -10 a 20 20 0 0 0 -20 -20 h -10`} stroke="#FFFFFF" strokeWidth={4} fill="none" />
+        <Path d={`M ${cx - holeSize/2} ${cy + holeSize/2 - 30} v 10 a 20 20 0 0 0 20 20 h 10`} stroke="#FFFFFF" strokeWidth={4} fill="none" />
+        <Path d={`M ${cx + holeSize/2} ${cy + holeSize/2 - 30} v 10 a 20 20 0 0 1 -20 20 h -10`} stroke="#FFFFFF" strokeWidth={4} fill="none" />
+      </Svg>
+    </View>
+  );
+};
+
 
 export default function ScannerScreen() {
   return (
@@ -35,12 +83,11 @@ export default function ScannerScreen() {
 
 function ScannerContent() {
   const router = useRouter();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const insets = useSafeAreaInsets();
   const _params = useLocalSearchParams<{ isUnassigned?: string }>();
   const user = useAuth((s) => s.user);
   const checkin = useCheckin();
 
-  // Read current optimistic state — if already optimistically checked in, block scan
   const homeQuery = useStudentHome();
   const isAlreadyOptimistic: boolean =
     homeQuery.data?.transport?.attendance?.isOptimistic === true ||
@@ -53,7 +100,6 @@ function ScannerContent() {
   const [isLowAccuracy, setIsLowAccuracy] = useState(false);
   const locationRef = useRef<Location.LocationObject | null>(null);
 
-  // Pre-fetch location on mount
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -74,10 +120,7 @@ function ScannerContent() {
   }, []);
 
   const handleBarCodeScanned = async ({ data: qrToken }: { data: string }) => {
-    // Guard 1: already processing a scan (debounce)
     if (scanned) return;
-
-    // Guard 2: student already checked in optimistically — prevent double-scan flicker
     if (isAlreadyOptimistic) {
       setScanned(false);
       router.replace('/(student)/');
@@ -85,9 +128,8 @@ function ScannerContent() {
     }
 
     setScanned(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-    // Get location (use pre-fetched or fetch now)
     let location = locationRef.current;
     if (!location) {
       try {
@@ -143,203 +185,257 @@ function ScannerContent() {
         });
       }
     } catch (err) {
-      // Unexpected throw from mutateAsync — reset scan lock so user can retry
       analytics.error(err as Error, { context: 'scanner_qr_unexpected' });
       setScanned(false);
     }
   };
 
-  // --- Permission states ---
+  // --- Permission States ---
   if (!permission) {
-    // Camera permission loading
-    return <ActivityIndicator style={{ flex: 1 }} color={colors.brand.primary} />;
+    return <View style={s.container} />;
   }
 
   if (!permission.granted) {
-    // canAskAgain: expo-camera type may not expose it officially but it exists at runtime
     const canAsk = (permission as any).canAskAgain !== false;
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.permissionWrap}>
-          <Text style={styles.permissionIcon}>📷</Text>
-          <Text style={styles.permissionTitle}>{t('scanner.cameraNeeded')}</Text>
-          <Text style={styles.permissionBody}>
+      <SafeAreaView style={s.permissionContainer}>
+        <Animated.View entering={FadeInDown.duration(400)} style={s.permCard}>
+          <Text style={s.permIcon}>📷</Text>
+          <Text style={s.permTitle}>Camera Access</Text>
+          <Text style={s.permBody}>
             {canAsk
-              ? 'We need camera access to scan the QR code on the bus.'
-              : 'Camera access was denied. Open Settings to enable it.'}
+              ? 'We need camera access to scan the QR code to log your attendance.'
+              : 'Camera access was denied. Please open Settings to enable it.'}
           </Text>
           <TouchableOpacity
-            style={styles.primaryButton}
+            style={s.permBtn}
             onPress={canAsk ? requestPermission : () => Linking.openSettings()}
+            activeOpacity={0.8}
           >
-            <Text style={styles.primaryButtonText}>
-              {canAsk ? t('scanner.allowCamera') : 'Open Settings'}
+            <Text style={s.permBtnText}>
+              {canAsk ? 'Allow Access' : 'Open Settings'}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()}>
-            <Text style={styles.cancelText}>{t('scanner.cancel')}</Text>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 24 }}>
+            <Text style={s.permCancel}>Cancel</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Back button */}
-      <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-        <Text style={styles.backText}>←</Text>
-      </TouchableOpacity>
+    <View style={s.container}>
 
-      {/* Camera */}
-      <View style={styles.cameraWrap}>
-        <CameraView
-          style={styles.camera}
-          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-        />
-        {/* Scan frame overlay */}
-        <View style={styles.overlay}>
-          <View style={[
-            styles.scanFrame,
-            isLowAccuracy && { borderColor: colors.warning.text },
-          ]} />
+      {/* Full Screen Camera */}
+      <CameraView
+        style={StyleSheet.absoluteFill}
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+      />
+
+      <CameraOverlay />
+
+      {/* Top Nav */}
+      <SafeAreaView edges={['top']} style={s.topNav}>
+        <TouchableOpacity style={s.backBtn} onPress={() => router.back()} activeOpacity={0.8}>
+          <BackIcon />
+        </TouchableOpacity>
+      </SafeAreaView>
+
+      {/* Processing State */}
+      {scanned && (
+        <View style={s.processingOverlay}>
+          <ActivityIndicator color="#FFFFFF" size="large" />
+          <Text style={s.processingText}>{t('scanner.processing')}</Text>
         </View>
+      )}
 
-        {scanned && (
-          <View style={styles.processingOverlay}>
-            <ActivityIndicator color={colors.white} size="large" />
-            <Text style={styles.processingText}>{t('scanner.processing')}</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Instructions */}
-      <View style={styles.bottom}>
-        <Text style={styles.instruction}>
+      {/* Floating Bottom Card */}
+      <Animated.View entering={FadeInUp.duration(500).springify().damping(20)} style={[s.bottomSheet, { paddingBottom: insets.bottom + 20 }]}>
+        <Text style={s.sheetTitle}>Scan to check in</Text>
+        <Text style={s.sheetDesc}>
           {isAlreadyOptimistic
-            ? 'Your check-in is already being recorded…'
-            : t('scanner.pointAt')}
+            ? 'Your check-in is already being recorded.'
+            : 'Point your camera at the QR code on the driver app.'}
         </Text>
 
-        {/* GPS status rows */}
-        {!locationReady && (
-          <Text style={styles.locationHint}>{t('scanner.fetchingLocation')}</Text>
-        )}
-        {locationReady && isLowAccuracy && (
-          <View style={styles.accuracyWarn}>
-            <Text style={styles.accuracyWarnText}>
-              GPS accuracy is low — check-in will be flagged for review
+        {(!locationReady || isLowAccuracy) && (
+          <View style={s.warnPill}>
+            <LocationWarnIcon />
+            <Text style={s.warnText}>
+              {!locationReady ? 'Fetching location...' : 'Low GPS accuracy. May be flagged for review.'}
             </Text>
           </View>
         )}
 
-        {/* Stop info card */}
         {user?.routeAssignment && (
-          <View style={styles.stopCard}>
-            <Text style={styles.stopText}>
-              {t('scanner.yourStop', {
-                stop: user.routeAssignment.stop.name,
-                bus: 'your bus',
-              })}
-            </Text>
+          <View style={s.stopRow}>
+            <Text style={s.stopRowLabel}>BOARDING AT</Text>
+            <Text style={s.stopRowValue}>{user.routeAssignment.stop.name}</Text>
           </View>
         )}
+      </Animated.View>
 
-        <TouchableOpacity onPress={() => router.back()} style={styles.cancelBtn}>
-          <Text style={styles.cancelText}>{t('scanner.cancel')}</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.black },
+const s = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: ds.bg,
+  },
+  topNav: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    paddingHorizontal: spacingExtended.screen,
+    paddingTop: 16,
+    zIndex: 10,
+  },
   backBtn: {
-    position: 'absolute', top: 50, left: spacing.xl, zIndex: 10,
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center', alignItems: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  backText: { fontSize: 18, color: colors.text.primary },
-  cameraWrap: { flex: 0.6, overflow: 'hidden', position: 'relative' },
-  camera: { flex: 1 },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  scanFrame: {
-    width: 220, height: 220,
-    borderWidth: 3, borderColor: colors.success.text,
-    borderRadius: 16,
-  },
+
   processingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
   },
   processingText: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    color: colors.white, marginTop: spacing.sm,
+    fontFamily: typography.family,
+    fontSize: 16,
+    fontWeight: typography.weights.bold,
+    color: '#FFFFFF',
+    marginTop: 16,
   },
-  bottom: {
-    flex: 0.4, paddingHorizontal: spacing.xl, paddingTop: spacing.xl,
-    alignItems: 'center', backgroundColor: colors.surface,
+
+  bottomSheet: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    backgroundColor: ds.cardBg,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: spacingExtended.screen,
+    paddingTop: 32,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -8 },
+    elevation: 20,
+    zIndex: 10,
   },
-  instruction: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    color: colors.text.secondary, textAlign: 'center',
+  sheetTitle: {
+    fontFamily: typography.family,
+    fontSize: 20,
+    fontWeight: typography.weights.bold,
+    color: ds.textInk,
+    marginBottom: 8,
   },
-  locationHint: {
-    fontFamily: typography.family, fontSize: typography.sizes.micro,
-    color: colors.warning.text, marginTop: spacing.xs,
+  sheetDesc: {
+    fontFamily: typography.family,
+    fontSize: 14,
+    color: ds.textMuted,
+    lineHeight: 20,
+    marginBottom: 20,
   },
-  accuracyWarn: {
-    backgroundColor: colors.warning.bg,
-    borderRadius: radii.sm,
-    padding: spacing.xs,
-    marginTop: spacing.xs,
+  warnPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: ds.warningBg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  warnText: {
+    fontFamily: typography.family,
+    fontSize: 12,
+    fontWeight: typography.weights.bold,
+    color: ds.warningText,
+    marginLeft: 8,
+  },
+  stopRow: {
+    backgroundColor: '#BFE6FF',
+    padding: 16,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stopRowLabel: {
+    fontFamily: typography.family,
+    fontSize: 10,
+    fontWeight: typography.weights.bold,
+    color: ds.textMuted,
+    letterSpacing: 1,
+  },
+  stopRowValue: {
+    fontFamily: typography.family,
+    fontSize: 14,
+    fontWeight: typography.weights.bold,
+    color: ds.textInk,
+  },
+
+  // Permission screen
+  permissionContainer: {
+    flex: 1,
+    backgroundColor: ds.bg,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  permCard: {
+    backgroundColor: ds.cardBg,
+    borderRadius: 32,
+    padding: 32,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 24,
+  },
+  permIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  permTitle: {
+    fontFamily: typography.family,
+    fontSize: 24,
+    fontWeight: typography.weights.bold,
+    color: ds.textInk,
+    marginBottom: 12,
+  },
+  permBody: {
+    fontFamily: typography.family,
+    fontSize: 15,
+    color: ds.textMuted,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 32,
+  },
+  permBtn: {
+    backgroundColor: ds.primary,
+    paddingVertical: 16,
     width: '100%',
+    borderRadius: 24,
+    alignItems: 'center',
   },
-  accuracyWarnText: {
-    fontFamily: typography.family, fontSize: typography.sizes.micro,
-    color: colors.warning.text, textAlign: 'center',
+  permBtnText: {
+    fontFamily: typography.family,
+    fontSize: 15,
+    fontWeight: typography.weights.bold,
+    color: '#FFFFFF',
   },
-  stopCard: {
-    backgroundColor: colors.card.bg, borderWidth: 1, borderColor: colors.card.border,
-    borderRadius: radii.sm, padding: spacing.md, marginTop: spacing.lg, width: '100%',
-  },
-  stopText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    color: colors.text.secondary, textAlign: 'center',
-  },
-  cancelBtn: { marginTop: spacing.lg },
-  cancelText: {
-    fontFamily: typography.family, fontSize: typography.sizes.small,
-    fontWeight: typography.weights.medium, color: colors.text.muted,
-  },
-  // --- Permission screen ---
-  permissionWrap: {
-    flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl,
-  },
-  permissionIcon: { fontSize: 48, marginBottom: spacing.md },
-  permissionTitle: {
-    fontFamily: typography.family, fontSize: typography.sizes.h2,
-    fontWeight: typography.weights.semibold, color: colors.text.primary,
-    marginBottom: spacing.sm, textAlign: 'center',
-  },
-  permissionBody: {
-    fontFamily: typography.family, fontSize: typography.sizes.body,
-    color: colors.text.secondary, textAlign: 'center',
-    marginBottom: spacing.lg, lineHeight: 22,
-  },
-  primaryButton: {
-    backgroundColor: colors.button.primary.bg, paddingVertical: 15,
-    paddingHorizontal: spacing.xl, borderRadius: radii.button,
-  },
-  primaryButtonText: {
-    fontFamily: typography.family, fontSize: 15,
-    fontWeight: typography.weights.semibold, color: colors.button.primary.text,
+  permCancel: {
+    fontFamily: typography.family,
+    fontSize: 14,
+    fontWeight: typography.weights.bold,
+    color: ds.textMuted,
   },
 });
