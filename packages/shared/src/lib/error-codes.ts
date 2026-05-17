@@ -119,6 +119,7 @@ export type ErrorCode =
   | 'MISSING_EXPECTED_STATUS'
   | 'CONFLICT'
   // ─── Server (500) ──────────────────────────────────────────────────────────
+  | 'ACTOR_NOT_RESOLVED'
   | 'INTERNAL_SERVER_ERROR';
 
 /**
@@ -239,6 +240,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NO_POSITION_AND_NO_ROUTE_ASSOCIATION: 'No location data and no route association found.',
   CSRF_VALIDATION_FAILED: 'CSRF validation failed.',
   // Server
+  ACTOR_NOT_RESOLVED: 'Authenticated actor was not resolved for this request.',
   INTERNAL_SERVER_ERROR: 'An unexpected error occurred.',
 };
 
@@ -360,5 +362,6 @@ export const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   MISSING_INCIDENT_ID: 400,
   MISSING_EXPECTED_STATUS: 400,
   CONFLICT: 409,
+  ACTOR_NOT_RESOLVED: 500,
   INTERNAL_SERVER_ERROR: 500,
 };

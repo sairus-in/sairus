@@ -1,11 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { cuidSchema, ok, okList, buildPagination, PUSH_TOKEN_PROVIDER } from 'shared';
+import { cuidSchema, ok, okList, buildPagination, PUSH_TOKEN_PROVIDER, serializeUser } from 'shared';
 import { AppError } from '../../lib/errors';
 import { mobileRoute, adminRoute } from '../../middleware/route-guards';
 import { checkRateLimit, RateLimits } from '../../lib/rate-limit';
 import { cacheIdempotentResponse, IDEMPOTENCY_TTL } from '../../plugins/idempotency';
-import { toTransportOfficerStudentDto, toCoordinatorStudentDto, toFacultyStudentDto } from './user.serializers';
+import { assertActor } from '../../spine/auth';
 import { usersService } from './users.service';
 
 const bulkImportSchema = z.array(z.object({
@@ -88,6 +88,7 @@ export async function usersRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
+    const actor = assertActor(request);
     const { role, page, limit, search, routeId, status, authStatus } = parsed.data;
 
     const whereClause: any = {};
@@ -106,7 +107,7 @@ export async function usersRoutes(app: FastifyInstance) {
       whereClause.authStatus = authStatus;
     }
 
-    if (request.user?.role === 'COORDINATOR' && request.coordinatorRouteIds) {
+    if (request.coordinatorRouteIds) {
       whereClause.routeAssignment = {
         routeId: { in: request.coordinatorRouteIds },
         isActive: true,
@@ -127,14 +128,15 @@ export async function usersRoutes(app: FastifyInstance) {
 
     const { total, users } = await usersService.listUsers(whereClause, page, limit);
 
-    let data;
-    if (request.user?.role === 'TRANSPORT_OFFICER' || request.user?.role === 'MANAGEMENT') {
-      data = users.map(toTransportOfficerStudentDto);
-    } else if (request.user?.role === 'COORDINATOR') {
-      data = users.map(toCoordinatorStudentDto);
-    } else {
-      data = users.map(toFacultyStudentDto);
-    }
+    const data = users.map((user) => {
+      const base = serializeUser(actor, user)!;
+      return {
+        ...base,
+        routeId: user.routeAssignment?.routeId ?? null,
+        stopId: user.routeAssignment?.stopId ?? null,
+        busNumber: user.routeAssignment?.route?.assignments?.[0]?.bus?.number ?? null,
+      };
+    });
 
     return reply.send(okList(data, buildPagination(page, limit, total), request.id));
   });

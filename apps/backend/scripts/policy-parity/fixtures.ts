@@ -9,6 +9,8 @@
  */
 
 import * as jwt from 'jsonwebtoken';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Fixed seed IDs (must match seed.ts) ──────────────────────────────────────
 
@@ -28,7 +30,16 @@ export const SESSION_VERSION = 1;
 // ── Token signing ─────────────────────────────────────────────────────────────
 
 const signingSecret = (): string => {
-  const secret = process.env.PARITY_JWT_SECRET ?? process.env.JWT_SECRET;
+  const backendEnvPath = path.resolve(__dirname, '../../.env');
+  const backendSecret = fs.existsSync(backendEnvPath)
+    ? fs.readFileSync(backendEnvPath, 'utf8')
+        .split(/\r?\n/)
+        .find((line) => line.startsWith('JWT_SECRET='))
+        ?.replace(/^JWT_SECRET=/, '')
+        .trim()
+        .replace(/^"|"$/g, '')
+    : undefined;
+  const secret = process.env.PARITY_JWT_SECRET ?? backendSecret ?? process.env.JWT_SECRET;
   if (!secret) {
     throw new Error('Set PARITY_JWT_SECRET or JWT_SECRET before running the parity script.');
   }
