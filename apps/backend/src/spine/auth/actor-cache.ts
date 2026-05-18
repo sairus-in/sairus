@@ -15,7 +15,7 @@
 
 import { redis } from '../../lib/redis';
 import { logger } from '../../lib/logger';
-import type { Actor, ActorType, Capability, ScopeContext, SessionContext } from 'shared';
+import type { Actor, ActorType, Capability, ScopeContext, SessionContext, AdminRole, Role } from 'shared';
 import { isActorType } from 'shared';
 
 export type ActorSource = 'mobile' | 'admin';
@@ -31,6 +31,7 @@ interface SerializedActor {
   capabilities: readonly string[];
   scope: ScopeContext;
   sessionContext: SessionContext;
+  role?: AdminRole | Role;
 }
 
 const serialize = (actor: Actor): SerializedActor => ({
@@ -39,6 +40,7 @@ const serialize = (actor: Actor): SerializedActor => ({
   capabilities: [...actor.capabilities],
   scope: actor.scope,
   sessionContext: actor.sessionContext,
+  role: actor.role,
 });
 
 const deserialize = (raw: string): Actor | null => {
@@ -65,6 +67,7 @@ const deserialize = (raw: string): Actor | null => {
     capabilities: new Set(candidate.capabilities as readonly Capability[]),
     scope: candidate.scope as ScopeContext,
     sessionContext: candidate.sessionContext as SessionContext,
+    role: candidate.role,
   };
 };
 

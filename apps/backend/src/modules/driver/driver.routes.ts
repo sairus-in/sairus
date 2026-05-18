@@ -1,7 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { mobileRoute } from '../../middleware/route-guards';
 import { AppError } from '../../lib/errors';
-import { ok } from 'shared';
+import { ok, serializeTrip } from 'shared';
+import { assertActor } from '../../spine/auth';
 import { serializeDriverAssignment } from './driver.serializers';
 import { driverService } from './driver.service';
 import { tripsService } from '../trips/trips.service';
@@ -44,10 +45,12 @@ export async function driverRoutes(app: FastifyInstance) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
+    const actor = assertActor(request);
     const trip = await tripsService.startTrip(parsed.data.tripId, request.user!.sub);
+    const serializedTrip = serializeTrip(actor, trip, { driverName: '' });
     reply.header('Deprecation', 'true');
     reply.header('Link', `</v1/trips/${parsed.data.tripId}/start>; rel="successor-version"`);
-    return reply.send(ok(trip, request.id));
+    return reply.send(ok(serializedTrip, request.id));
   });
 
   // GET /route-stops — get all stops for driver's assigned route
@@ -77,13 +80,15 @@ export async function driverRoutes(app: FastifyInstance) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
+    const actor = assertActor(request);
     const trip = await tripsService.endTrip(parsed.data.tripId, request.user!.sub, {
       actorType: 'MOBILE_USER',
       actorId: request.user!.sub,
       ip: request.ip,
     });
+    const serializedTrip = serializeTrip(actor, trip, { driverName: '' });
     reply.header('Deprecation', 'true');
     reply.header('Link', `</v1/trips/${parsed.data.tripId}/end>; rel="successor-version"`);
-    return reply.send(ok(trip, request.id));
+    return reply.send(ok(serializedTrip, request.id));
   });
 }

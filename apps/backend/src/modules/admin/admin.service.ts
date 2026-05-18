@@ -2,11 +2,11 @@ import { redis } from '../../lib/redis';
 import { auditService, AuditActorContext } from '../../lib/audit.service';
 import { cacheDel, cacheGet, cacheHIncrBy, cacheSet } from '../../lib/cache';
 import * as adminRepository from './admin.repository';
-import { NotFoundError, BadRequestError } from '../../lib/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
-import { ResolvedAdminAccessContext, assertAdminAction } from '../../lib/admin-access';
+import type { Actor, Capability } from 'shared';
+import { policy } from 'shared';
 import {
-  AdminAction,
   AdminActionContext,
   AdminCommandCenterPayload,
   AdminCommandEntity,
@@ -186,16 +186,16 @@ export class AdminService {
   // END PHASE 0C WRAPPER DELEGATIONS
   // ==========================================
 
-  private isCoordinatorAccess(access?: ResolvedAdminAccessContext): access is ResolvedAdminAccessContext {
-    return access?.role === 'COORDINATOR';
+  private isCoordinatorActor(actor: Actor): boolean {
+    return actor.role === 'COORDINATOR';
   }
 
-  private getScopedRouteIds(access?: ResolvedAdminAccessContext): string[] | null {
-    return this.isCoordinatorAccess(access) ? access.scope.routeIds : null;
+  private getScopedRouteIds(actor: Actor): string[] | null {
+    return this.isCoordinatorActor(actor) ? [...actor.scope.routeIds] : null;
   }
 
-  private getScopedCacheKey(baseKey: string, access?: ResolvedAdminAccessContext) {
-    const routeIds = this.getScopedRouteIds(access);
+  private getScopedCacheKey(baseKey: string, actor: Actor) {
+    const routeIds = this.getScopedRouteIds(actor);
     if (!routeIds) {
       return baseKey;
     }
@@ -205,25 +205,24 @@ export class AdminService {
   }
 
   private assertRouteAction(
-    access: ResolvedAdminAccessContext | undefined,
-    action: AdminAction,
+    actor: Actor,
+    capability: Capability,
     routeId?: string | null,
   ) {
-    if (!access) {
-      return;
-    }
-
-    if (this.isCoordinatorAccess(access) && !routeId) {
+    if (this.isCoordinatorActor(actor) && !routeId) {
       throw new BadRequestError('ROUTE_CONTEXT_REQUIRED');
     }
 
-    assertAdminAction(access, action, routeId ? { routeId } : undefined);
+    const decision = policy.can(actor, capability, routeId ? { routeId } : undefined);
+    if (!decision.allowed) {
+      throw new ForbiddenError('FORBIDDEN');
+    }
   }
 
   private async getScopedTripOrThrow(
     tripId: string,
-    access: ResolvedAdminAccessContext | undefined,
-    action: AdminAction,
+    actor: Actor,
+    capability: Capability,
   ) {
     const trip = await tripsService.getTripByIdForAdmin(tripId);
 
@@ -231,14 +230,14 @@ export class AdminService {
       throw new NotFoundError('TRIP_NOT_FOUND');
     }
 
-    this.assertRouteAction(access, action, trip.routeId);
+    this.assertRouteAction(actor, capability, trip.routeId);
     return trip;
   }
 
   private async getScopedIncidentOrThrow(
     incidentId: string,
-    access: ResolvedAdminAccessContext | undefined,
-    action: AdminAction,
+    actor: Actor,
+    capability: Capability,
   ) {
     const incident = await incidentsService.getIncidentByIdForAdmin(incidentId);
 
@@ -250,7 +249,7 @@ export class AdminService {
       await tripsService.getTripByIdForAdmin(incident.tripId)
     )?.routeId;
 
-    this.assertRouteAction(access, action, routeId);
+    this.assertRouteAction(actor, capability, routeId);
 
     return {
       ...incident,
@@ -260,8 +259,8 @@ export class AdminService {
 
   private async getScopedCorrectionOrThrow(
     correctionId: string,
-    access: ResolvedAdminAccessContext | undefined,
-    action: AdminAction,
+    actor: Actor,
+    capability: Capability,
   ) {
     const correction = await attendanceService.getScopedCorrectionOrThrow(correctionId);
 
@@ -269,7 +268,7 @@ export class AdminService {
       throw new NotFoundError('CORRECTION_NOT_FOUND');
     }
 
-    this.assertRouteAction(access, action, correction.attendance.routeId);
+    this.assertRouteAction(actor, capability, correction.attendance.routeId);
     return correction;
   }
 
@@ -616,8 +615,8 @@ export class AdminService {
     };
   }
 
-  private async getLateStartEntityInputs(access?: ResolvedAdminAccessContext) {
-    const routeIds = this.getScopedRouteIds(access);
+  private async getLateStartEntityInputs(actor: Actor) {
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds && routeIds.length === 0) {
       return [];
     }
@@ -663,8 +662,8 @@ export class AdminService {
    * Pattern 1: Live Ops Dashboard Stats
    * Guaranteed < 20ms response time fed entirely via Redis.
    */
-  async getLiveDashboardStats(access?: ResolvedAdminAccessContext) {
-    const routeIds = this.getScopedRouteIds(access);
+  async getLiveDashboardStats(actor: Actor) {
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds) {
       if (routeIds.length === 0) {
         return {
@@ -676,7 +675,7 @@ export class AdminService {
       }
 
       const [activeTripsResult, gpsOffline, openCorrections] = await Promise.all([
-        this.getActiveTrips(access),
+        this.getActiveTrips(actor),
         routeIds ? tripsService.countActiveOfflineTrips(routeIds) : Promise.resolve(0),
         attendanceService.countPendingCorrectionsForAdmin(routeIds ?? null),
       ]);
@@ -703,10 +702,10 @@ export class AdminService {
    * Iterates real-time trips set to return populated Hash states.
    */
   async getActiveTrips(
-    access?: ResolvedAdminAccessContext,
+    actor: Actor,
     pagination?: { page: number; limit: number },
   ): Promise<{ trips: any[]; total: number }> {
-    const routeIds = this.getScopedRouteIds(access);
+    const routeIds = this.getScopedRouteIds(actor);
     const skip = pagination ? (pagination.page - 1) * pagination.limit : 0;
     const stop = pagination ? skip + pagination.limit - 1 : -1;
 
@@ -777,11 +776,11 @@ export class AdminService {
   /**
    * Pattern 1: Get single Trip State
    */
-  async getTripState(tripId: string, access?: ResolvedAdminAccessContext) {
+  async getTripState(tripId: string, actor: Actor) {
     const state = await redis.hgetall(`trip:${tripId}:state`);
     if (!Object.keys(state).length) return null;
 
-    const routeIds = this.getScopedRouteIds(access);
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds && !routeIds.includes(state.routeId || '')) {
       return null;
     }
@@ -799,10 +798,10 @@ export class AdminService {
   // PATTERN 1: LIVE ALERTS
   // ==========================================
   
-  async getLiveAlerts(access?: ResolvedAdminAccessContext) {
+  async getLiveAlerts(actor: Actor) {
     // Get all alerts from sorted set, top score first (newest timestamp)
     const rawAlerts = await redis.zrevrange('admin:alerts', 0, 50);
-    const routeIds = this.getScopedRouteIds(access);
+    const routeIds = this.getScopedRouteIds(actor);
     if (!routeIds) {
       return rawAlerts.map(normalizeAlert);
     }
@@ -850,8 +849,8 @@ export class AdminService {
       .map((alert) => normalizeAlert(alert.rawAlert));
   }
 
-  async getCommandCenter(access?: ResolvedAdminAccessContext): Promise<AdminCommandCenterPayload> {
-    const routeIds = this.getScopedRouteIds(access);
+  async getCommandCenter(actor: Actor): Promise<AdminCommandCenterPayload> {
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds && routeIds.length === 0) {
       return {
         generatedAt: new Date().toISOString(),
@@ -868,11 +867,11 @@ export class AdminService {
     }
 
     const [stats, outageQueue, lateStarts, unresolvedIncidents, activeTripsResult] = await Promise.all([
-      this.getLiveDashboardStats(access),
-      this.getGpsOutageQueue(access),
-      this.getLateStartEntityInputs(access),
+      this.getLiveDashboardStats(actor),
+      this.getGpsOutageQueue(actor),
+      this.getLateStartEntityInputs(actor),
       incidentsService.getActiveIncidentsForCommandCenter(routeIds ?? null),
-      this.getActiveTrips(access),
+      this.getActiveTrips(actor),
     ]);
 
     const tripIdToDriver = new Map(activeTripsResult.trips.map((trip: any) => [trip.id, trip.driverName ?? null]));
@@ -973,9 +972,9 @@ export class AdminService {
     };
   }
 
-  async getGpsOutageQueue(access?: ResolvedAdminAccessContext): Promise<AdminGpsOutageQueueResponse> {
+  async getGpsOutageQueue(actor: Actor): Promise<AdminGpsOutageQueueResponse> {
     const activeTripIds = await redis.smembers('active-trips');
-    const routeIds = this.getScopedRouteIds(access);
+    const routeIds = this.getScopedRouteIds(actor);
     const activeStatePipeline = redis.pipeline();
     activeTripIds.forEach((tripId) => activeStatePipeline.hgetall(`trip:${tripId}:state`));
     const activeStateResults = activeTripIds.length > 0
@@ -1097,10 +1096,10 @@ export class AdminService {
   }
 
   async getGpsOutageCorrections(
-    access?: ResolvedAdminAccessContext,
+    actor: Actor,
     pagination?: { page: number; limit: number },
   ): Promise<{ corrections: AdminGpsOutageCorrection[]; total: number }> {
-    const routeIds = this.getScopedRouteIds(access);
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds && routeIds.length === 0) {
       return { corrections: [], total: 0 };
     }
@@ -1128,10 +1127,10 @@ export class AdminService {
   // ==========================================
 
   async getPendingCorrections(
-    access?: ResolvedAdminAccessContext,
+    actor: Actor,
     pagination?: { page: number; limit: number },
   ) {
-    const routeIds = this.getScopedRouteIds(access);
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds && routeIds.length === 0) {
       return { corrections: [], total: 0 };
     }
@@ -1145,10 +1144,10 @@ export class AdminService {
     correctionId: string,
     status: 'APPROVED' | 'REJECTED',
     reviewerId: string,
-    access?: ResolvedAdminAccessContext,
+    actor: Actor,
     auditActor?: AuditActorContext,
   ) {
-    const correction = await this.getScopedCorrectionOrThrow(correctionId, access, 'REVIEW_CORRECTIONS');
+    const correction = await this.getScopedCorrectionOrThrow(correctionId, actor, 'admin.correction.review');
     if (correction.status !== 'PENDING') throw new BadRequestError('CORRECTION_ALREADY_RESOLVED');
     const before = {
       correctionStatus: correction.status,
@@ -1158,7 +1157,7 @@ export class AdminService {
     const updated = await attendanceService.resolveCorrectionForAdmin(correctionId, status, reviewerId, correction);
 
     // Invalidate Pattern 2 cache and live stats
-    await cacheDel(this.getScopedCacheKey('admin:corrections:pending', access));
+    await cacheDel(this.getScopedCacheKey('admin:corrections:pending', actor));
     await cacheHIncrBy('dashboard:stats', 'openCorrections', -1);
 
     if (io) {
@@ -1195,19 +1194,19 @@ export class AdminService {
 
   async assertTripAccess(
     tripId: string,
-    action: AdminAction,
-    access?: ResolvedAdminAccessContext,
+    capability: Capability,
+    actor: Actor,
   ) {
-    await this.getScopedTripOrThrow(tripId, access, action);
+    await this.getScopedTripOrThrow(tripId, actor, capability);
   }
 
   async resolveIncident(
     incidentId: string,
     resolverId: string,
     resolutionNotes: string,
-    access?: ResolvedAdminAccessContext,
+    actor: Actor,
   ) {
-    const incident = await this.getScopedIncidentOrThrow(incidentId, access, 'RESOLVE_INCIDENTS');
+    const incident = await this.getScopedIncidentOrThrow(incidentId, actor, 'admin.incident.resolve');
 
     const updated = await incidentsService.resolveIncidentForAdmin(incidentId, resolverId, resolutionNotes);
 
@@ -1224,9 +1223,9 @@ export class AdminService {
     return updated;
   }
 
-  async getTripStudents(tripId: string, access?: ResolvedAdminAccessContext) {
-    const trip = await this.getScopedTripOrThrow(tripId, access, 'VIEW_TRIP_DETAIL');
-    const cacheKey = this.getScopedCacheKey(`trip:${tripId}:students`, access);
+  async getTripStudents(tripId: string, actor: Actor) {
+    const trip = await this.getScopedTripOrThrow(tripId, actor, 'admin.trip.view');
+    const cacheKey = this.getScopedCacheKey(`trip:${tripId}:students`, actor);
     const cached = await cacheGet(cacheKey);
     if (cached) return cached;
 
@@ -1236,9 +1235,9 @@ export class AdminService {
     return logs;
   }
 
-  async getTripTimeline(tripId: string, access?: ResolvedAdminAccessContext) {
-    const trip = await this.getScopedTripOrThrow(tripId, access, 'VIEW_TRIP_DETAIL');
-    const cacheKey = this.getScopedCacheKey(`trip:${tripId}:timeline`, access);
+  async getTripTimeline(tripId: string, actor: Actor) {
+    const trip = await this.getScopedTripOrThrow(tripId, actor, 'admin.trip.view');
+    const cacheKey = this.getScopedCacheKey(`trip:${tripId}:timeline`, actor);
     const cached = await cacheGet(cacheKey);
     if (cached) return cached;
 
@@ -1260,11 +1259,11 @@ export class AdminService {
   }
 
   async getIncidents(
+    actor: Actor,
     status?: string,
-    access?: ResolvedAdminAccessContext,
     pagination?: { page: number; limit: number },
   ) {
-    const routeIds = this.getScopedRouteIds(access);
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds && routeIds.length === 0) {
       return { incidents: [], total: 0 };
     }
@@ -1284,8 +1283,8 @@ export class AdminService {
     return { incidents, total };
   }
 
-  async getMessages(params: MessageQuery = {}, access?: ResolvedAdminAccessContext) {
-    const routeIds = this.getScopedRouteIds(access);
+  async getMessages(params: MessageQuery = {}, actor: Actor) {
+    const routeIds = this.getScopedRouteIds(actor);
     if (routeIds && routeIds.length === 0) {
       return [];
     }
@@ -1293,9 +1292,9 @@ export class AdminService {
     return findMessages(params, routeIds);
   }
 
-  async sendMessage(senderId: string, input: AdminMessageInput, access?: ResolvedAdminAccessContext) {
+  async sendMessage(senderId: string, input: AdminMessageInput, actor: Actor) {
     const resolved = await this.resolveMessageContext(input.context, input.busId, input.routeId, input.type);
-    this.assertRouteAction(access, 'SEND_MESSAGE_TO_DRIVER', resolved.routeId);
+    this.assertRouteAction(actor, 'admin.message.send_to_driver', resolved.routeId);
     if (!isMessageType(resolved.derivedType)) {
       throw new BadRequestError('VALIDATION_ERROR');
     }
@@ -1349,8 +1348,8 @@ export class AdminService {
   async notifyAffectedUsers(
     tripId: string,
     actorId: string,
+    actor: Actor,
     note?: string,
-    access?: ResolvedAdminAccessContext,
   ) {
     const trip = await tripsService.getTripWithBusAndRoute(tripId);
 
@@ -1358,7 +1357,7 @@ export class AdminService {
       throw new NotFoundError('TRIP_NOT_FOUND');
     }
 
-    this.assertRouteAction(access, 'SEND_MESSAGE_TO_DRIVER', trip.routeId);
+    this.assertRouteAction(actor, 'admin.message.send_to_driver', trip.routeId);
 
     const assignments = await adminRepository.findActiveRouteAssignments([trip.routeId]);
     const userIds = assignments.map((assignment) => assignment.userId);
@@ -1386,7 +1385,7 @@ export class AdminService {
         busId: trip.busId,
         routeId: trip.routeId,
       },
-    }, access);
+    }, actor);
 
     return {
       success: true,
@@ -1398,8 +1397,8 @@ export class AdminService {
   async requestDelegateSupport(
     tripId: string,
     actorId: string,
+    actor: Actor,
     note?: string,
-    access?: ResolvedAdminAccessContext,
   ) {
     const trip = await tripsService.getTripWithBusAndRoute(tripId);
 
@@ -1407,7 +1406,7 @@ export class AdminService {
       throw new NotFoundError('TRIP_NOT_FOUND');
     }
 
-    this.assertRouteAction(access, 'COORDINATOR_OVERRIDE', trip.routeId);
+    this.assertRouteAction(actor, 'admin.trip.override', trip.routeId);
 
     const [coordinators, officers] = await Promise.all([
       adminRepository.findCoordinatorsForRoute(trip.routeId),
@@ -1443,7 +1442,7 @@ export class AdminService {
         busId: trip.busId,
         routeId: trip.routeId,
       },
-    }, access);
+    }, actor);
 
     return {
       success: true,
@@ -1455,15 +1454,15 @@ export class AdminService {
   async escalateIncident(
     incidentId: string,
     actorId: string,
+    actor: Actor,
     note?: string,
-    access?: ResolvedAdminAccessContext,
   ) {
     const incident = await incidentsService.getIncidentWithBusAndRoute(incidentId);
 
     if (!incident) {
       throw new NotFoundError('INCIDENT_NOT_FOUND');
     }
-    this.assertRouteAction(access, 'ESCALATE_INCIDENTS', incident.routeId ?? incident.trip.routeId);
+    this.assertRouteAction(actor, 'admin.incident.escalate', incident.routeId ?? incident.trip.routeId);
     if (incident.status === 'RESOLVED' || incident.status === 'CANCELLED') {
       throw new BadRequestError('INCIDENT_NOT_ACTIVE');
     }
@@ -1505,7 +1504,7 @@ export class AdminService {
         busId: updated.busId,
         routeId: updated.routeId ?? undefined,
       },
-    }, access);
+    }, actor);
 
     if (io) {
       io.to('admin').emit('incident:updated', {
@@ -1527,9 +1526,9 @@ export class AdminService {
 
   async getSubstituteCandidates(
     tripId: string,
-    access?: ResolvedAdminAccessContext,
+    actor: Actor,
   ): Promise<AdminSubstituteCandidate[]> {
-    const trip = await this.getScopedTripOrThrow(tripId, access, 'ASSIGN_SUBSTITUTE');
+    const trip = await this.getScopedTripOrThrow(tripId, actor, 'admin.trip.assign_substitute');
 
     const activeBusIds = new Set(await tripsService.getActiveBusIds());
 
@@ -1556,7 +1555,7 @@ export class AdminService {
     incidentId: string,
     alternateBusId: string,
     actorId: string,
-    access?: ResolvedAdminAccessContext,
+    actor: Actor,
   ) {
     const [incident, alternateBus] = await Promise.all([
       incidentsService.getIncidentWithBusAndRoute(incidentId),
@@ -1566,7 +1565,7 @@ export class AdminService {
     if (!incident) {
       throw new NotFoundError('INCIDENT_NOT_FOUND');
     }
-    this.assertRouteAction(access, 'ASSIGN_SUBSTITUTE', incident.routeId ?? incident.trip.routeId);
+    this.assertRouteAction(actor, 'admin.trip.assign_substitute', incident.routeId ?? incident.trip.routeId);
     if (!alternateBus || !alternateBus.isActive) {
       throw new BadRequestError('ALTERNATE_BUS_NOT_AVAILABLE');
     }
@@ -1595,7 +1594,7 @@ export class AdminService {
         busId: incident.busId,
         routeId: incident.routeId ?? undefined,
       },
-    }, access);
+    }, actor);
 
     if (io) {
       io.to('admin').emit('incident:updated', {

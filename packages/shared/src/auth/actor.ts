@@ -9,6 +9,8 @@
  */
 
 import type { Capability } from './capabilities';
+import type { AdminRole } from '../schemas/common';
+import type { Role } from '../types/user.types';
 
 /**
  * Type of authenticated principal. Drives capability defaults and serializer
@@ -58,6 +60,13 @@ export interface Actor {
   readonly capabilities: ReadonlySet<Capability>;
   readonly scope: ScopeContext;
   readonly sessionContext: SessionContext;
+  /**
+   * Optional principal role. Populated for admin actors (AdminRole) and
+   * mobile actors (Role). Used by policy predicates and services that need
+   * role-aware gating beyond capability checks (e.g. COORDINATOR ownership
+   * rules on report jobs). Absent for system actors.
+   */
+  readonly role?: AdminRole | Role;
 }
 
 /**

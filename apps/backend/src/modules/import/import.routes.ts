@@ -1,10 +1,22 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { adminRoute } from '../../middleware/route-guards';
 import { importService } from './import.service';
-import { assertAdminAction, getAdminAccessContext } from '../../lib/admin-access';
-import { AppError } from '../../lib/errors';
-import { ok } from 'shared';
+import { AppError, ForbiddenError } from '../../lib/errors';
+import { ok, policy } from 'shared';
+import type { Capability } from 'shared';
 import * as z from 'zod';
+
+const requireCapability = (request: FastifyRequest, capability: Capability) => {
+  const actor = request.actor;
+  if (!actor) {
+    throw new ForbiddenError('FORBIDDEN');
+  }
+  const decision = policy.can(actor, capability);
+  if (!decision.allowed) {
+    throw new ForbiddenError('FORBIDDEN');
+  }
+  return actor;
+};
 
 const importRowSchema = z.object({
   phone: z.string().min(1),
@@ -26,8 +38,7 @@ export async function importRoutes(app: FastifyInstance) {
   app.post('/validate', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']),
   }, async (request, reply) => {
-    const access = await getAdminAccessContext(request.user!.sub);
-    assertAdminAction(access, 'BULK_IMPORT_STUDENTS');
+    requireCapability(request, 'admin.student.bulk_import');
     const parsed = validateBodySchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
@@ -40,8 +51,7 @@ export async function importRoutes(app: FastifyInstance) {
   app.post<{ Params: { sessionId: string } }>('/:sessionId/execute', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']),
   }, async (request) => {
-    const access = await getAdminAccessContext(request.user!.sub);
-    assertAdminAction(access, 'BULK_IMPORT_STUDENTS');
+    requireCapability(request, 'admin.student.bulk_import');
     const result = await importService.executeImportSession(request.params.sessionId, request.user!.sub);
     return result;
   });
@@ -49,8 +59,7 @@ export async function importRoutes(app: FastifyInstance) {
   app.patch<{ Params: { sessionId: string; rowId: string } }>('/:sessionId/rows/:rowId', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']),
   }, async (request, reply) => {
-    const access = await getAdminAccessContext(request.user!.sub);
-    assertAdminAction(access, 'BULK_IMPORT_STUDENTS');
+    requireCapability(request, 'admin.student.bulk_import');
     const parsed = importRowSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);

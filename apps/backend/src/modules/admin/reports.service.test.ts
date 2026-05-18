@@ -32,28 +32,35 @@ vi.mock('../../lib/redis', () => ({
   },
 }));
 
-const buildCoordinatorAccess = (routeIds: string[], adminId = 'admin_coord') => ({
-  adminId,
-  email: `${adminId}@example.com`,
-  role: 'COORDINATOR' as const,
-  department: null,
-  linkedUserId: null,
+import type { Actor } from 'shared';
+import { capabilitiesForAdminRole } from 'shared';
+
+const buildCoordinatorAccess = (routeIds: string[], adminId = 'admin_coord'): Actor => ({
+  actorId: adminId,
+  actorType: 'admin',
+  capabilities: capabilitiesForAdminRole('COORDINATOR'),
   scope: {
     routeIds,
     departmentIds: [],
+    busId: null,
+    tripId: null,
   },
+  sessionContext: { requestId: 'test-req' },
+  role: 'COORDINATOR',
 });
 
-const buildOfficerAccess = (adminId = 'admin_officer') => ({
-  adminId,
-  email: `${adminId}@example.com`,
-  role: 'TRANSPORT_OFFICER' as const,
-  department: null,
-  linkedUserId: null,
+const buildOfficerAccess = (adminId = 'admin_officer'): Actor => ({
+  actorId: adminId,
+  actorType: 'admin',
+  capabilities: capabilitiesForAdminRole('TRANSPORT_OFFICER'),
   scope: {
     routeIds: [],
     departmentIds: [],
+    busId: null,
+    tripId: null,
   },
+  sessionContext: { requestId: 'test-req' },
+  role: 'TRANSPORT_OFFICER',
 });
 
 describe('reports service scope enforcement', () => {

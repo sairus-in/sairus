@@ -29,7 +29,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
 
     const routeIds = Array.isArray(user.routeIds) ? user.routeIds : [];
-    const capabilities = getCapabilities(parsedRole.data, routeIds, user.department);
+    const sessionCapabilities = Array.isArray(user.capabilities) ? user.capabilities : [];
+    const capabilities = getCapabilities(sessionCapabilities, parsedRole.data, routeIds, user.department);
     set({
       user: { ...user, role: parsedRole.data },
       capabilities,

@@ -9,13 +9,15 @@
  *   1. Look up `actor:{source}:{actorId}` in Redis-A.
  *   2. Cache miss → buildActor() (pure, no DB) → write-through.
  *
- * Scope in Phase 1a:
- *   The Actor's scope.routeIds / departmentIds are EMPTY here. Coordinator
- *   route scope is populated by the `scopeCoordinator` preHandler, which
- *   runs later in the per-route chain and writes to req.coordinatorRouteIds.
- *   Commit 5 will reconcile: the migrated authz call sites will either
- *   re-resolve the actor post-scope or read scope from the request directly.
- *   Until then, downstream policy checks must not depend on actor.scope.
+ * Scope in Phase 1a (Commit 8):
+ *   For admin actors, scope.routeIds / departmentIds are populated from the
+ *   AdminScope table on every cache miss. Missing rows = empty scope, and
+ *   policy.can() denies route-scoped actions for actors whose role normally
+ *   requires scope (COORDINATOR, FACULTY). No legacy bridge fallback.
+ *
+ *   Cache TTL is 5 minutes — scope mutations through admin-auth flows are
+ *   eventually consistent. Acceptable for Phase 1a; invalidation hooks may
+ *   be added in a follow-up.
  *
  * Socket auth in websocket/socket.ts (lines 64, 202) is the third place
  * a principal is established and currently does NOT call resolveActor.
@@ -38,6 +40,7 @@ import {
   emptyScope,
 } from 'shared';
 import { actorCache, type ActorSource } from './actor-cache';
+import { prisma } from '../../lib/prisma';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -62,7 +65,7 @@ const mobileActorType = (role: Role): ActorType => {
   }
 };
 
-const buildActor = (user: AuthUser, source: ActorSource, requestId: string): Actor => {
+const buildActor = async (user: AuthUser, source: ActorSource, requestId: string): Promise<Actor> => {
   if (source === 'mobile') {
     const mobile = user as MobileAuthUser;
     const capabilities: ReadonlySet<Capability> = capabilitiesForMobileRole(mobile.role);
@@ -75,19 +78,41 @@ const buildActor = (user: AuthUser, source: ActorSource, requestId: string): Act
         deviceId: mobile.deviceId,
         requestId,
       },
+      role: mobile.role,
     };
   }
 
   const admin = user as AdminAuthUser;
   const capabilities: ReadonlySet<Capability> = capabilitiesForAdminRole(admin.role);
+
+  // Phase 1A: scope is the AdminScope table. Missing rows = empty scope =
+  // policy.can() denies route-scoped actions naturally. No legacy fallback.
+  const dbScopes = await prisma.adminScope.findMany({
+    where: { adminUserId: admin.userId },
+    select: { routeId: true, department: true },
+  });
+
+  const routeIds = Array.from(new Set(
+    dbScopes.map((s) => s.routeId).filter((r): r is string => Boolean(r)),
+  ));
+  const departmentIds = Array.from(new Set(
+    dbScopes.map((s) => s.department).filter((d): d is string => Boolean(d)),
+  ));
+
   return {
     actorId: admin.userId,
     actorType: 'admin',
     capabilities,
-    scope: emptyScope(),
+    scope: {
+      routeIds,
+      departmentIds,
+      busId: null,
+      tripId: null,
+    },
     sessionContext: {
       requestId,
     },
+    role: admin.role,
   };
 };
 
@@ -107,7 +132,7 @@ export const resolveActor = async (
       },
     };
   }
-  const actor = buildActor(user, source, req.id);
+  const actor = await buildActor(user, source, req.id);
   await actorCache.set(source, actor);
   return actor;
 };

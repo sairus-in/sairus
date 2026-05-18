@@ -1,4 +1,4 @@
-import { AdminAccessContext, AdminRole, canAdmin } from 'shared';
+import type { AdminRole, Capability } from 'shared';
 
 export type { AdminRole };
 
@@ -44,53 +44,50 @@ export interface Capabilities {
   dataScope: 'FULL' | 'AGGREGATE_ONLY';
 }
 
-const buildAdminContext = (role: AdminRole, routeIds: string[] = [], department?: string): AdminAccessContext => ({
-  role,
-  scope: {
-    routeIds,
-    departmentIds: department ? [department] : [],
-  },
-});
-
-export const getCapabilities = (role: AdminRole, routeIds: string[] = [], department?: string): Capabilities => {
-  const admin = buildAdminContext(role, routeIds, department);
+export const getCapabilities = (
+  capabilities: string[],
+  role: AdminRole,
+  routeIds: string[] = [],
+  department?: string | null,
+): Capabilities => {
+  const has = (cap: Capability) => capabilities.includes(cap);
 
   return {
-    canViewDashboard: canAdmin(admin, 'VIEW_DASHBOARD'),
-    canViewCommandCenter: canAdmin(admin, 'VIEW_COMMAND_CENTER'),
-    canViewFleetMap: canAdmin(admin, 'VIEW_FLEET_MAP'),
-    canViewTripDetail: canAdmin(admin, 'VIEW_TRIP_DETAIL'),
-    canViewIncidents: canAdmin(admin, 'VIEW_INCIDENTS'),
-    canViewMessages: canAdmin(admin, 'VIEW_MESSAGES'),
-    canMessageDrivers: canAdmin(admin, 'SEND_MESSAGE_TO_DRIVER'),
+    canViewDashboard: has('admin.dashboard.view'),
+    canViewCommandCenter: has('admin.command_center.view'),
+    canViewFleetMap: has('admin.fleet_map.view'),
+    canViewTripDetail: has('admin.trip.view'),
+    canViewIncidents: has('admin.incident.view'),
+    canViewMessages: has('admin.message.view'),
+    canMessageDrivers: has('admin.message.send_to_driver'),
 
-    canReviewCorrections: canAdmin(admin, 'REVIEW_CORRECTIONS'),
-    canReviewGPSOutage: canAdmin(admin, 'REVIEW_GPS_OUTAGE'),
-    canCoordinatorOverride: canAdmin(admin, 'COORDINATOR_OVERRIDE'),
+    canReviewCorrections: has('admin.correction.review'),
+    canReviewGPSOutage: has('admin.gps_outage.review'),
+    canCoordinatorOverride: has('admin.trip.override'),
 
-    canManageStudents: canAdmin(admin, 'MANAGE_STUDENTS'),
-    canBulkImportStudents: canAdmin(admin, 'BULK_IMPORT_STUDENTS'),
-    canManageRoutes: canAdmin(admin, 'MANAGE_ROUTES'),
-    canManageBuses: canAdmin(admin, 'MANAGE_BUSES'),
-    canManageDrivers: canAdmin(admin, 'MANAGE_DRIVERS'),
-    canBulkAssignRoutes: canAdmin(admin, 'BULK_ASSIGN_ROUTES'),
+    canManageStudents: has('admin.student.manage'),
+    canBulkImportStudents: has('admin.student.bulk_import'),
+    canManageRoutes: has('admin.route.manage'),
+    canManageBuses: has('admin.bus.manage'),
+    canManageDrivers: has('admin.driver.manage'),
+    canBulkAssignRoutes: has('admin.route.bulk_assign'),
 
-    canViewAttendanceReports: canAdmin(admin, 'VIEW_ATTENDANCE_REPORTS'),
-    canViewAuditLog: canAdmin(admin, 'VIEW_AUDIT_LOG'),
-    canViewSecuritySettings: canAdmin(admin, 'VIEW_SECURITY_SETTINGS'),
-    canViewImportSessions: canAdmin(admin, 'VIEW_IMPORT_SESSIONS'),
-    canRetryImportRows: canAdmin(admin, 'RETRY_IMPORT_ROWS'),
-    canViewPendingAuth: canAdmin(admin, 'VIEW_PENDING_AUTH'),
-    canInviteAdmin: canAdmin(admin, 'INVITE_ADMIN'),
-    canViewDefaulters: canAdmin(admin, 'VIEW_DEFAULTERS'),
-    canNotifyDefaulters: canAdmin(admin, 'NOTIFY_DEFAULTERS'),
-    canExportAttendance: canAdmin(admin, 'EXPORT_ATTENDANCE'),
+    canViewAttendanceReports: has('admin.attendance_report.view'),
+    canViewAuditLog: has('admin.audit_log.view'),
+    canViewSecuritySettings: has('admin.security.view'),
+    canViewImportSessions: has('admin.import.view'),
+    canRetryImportRows: has('admin.import.retry'),
+    canViewPendingAuth: has('admin.auth_provisioning.view'),
+    canInviteAdmin: has('admin.admin_user.invite'),
+    canViewDefaulters: has('admin.defaulter.view'),
+    canNotifyDefaulters: has('admin.defaulter.notify'),
+    canExportAttendance: has('admin.attendance.export'),
 
-    canEndTripManually: canAdmin(admin, 'END_TRIP_MANUALLY'),
-    canAssignSubstitute: canAdmin(admin, 'ASSIGN_SUBSTITUTE'),
-    canManualMarkPresent: canAdmin(admin, 'MANUAL_MARK_PRESENT'),
-    canResolveIncidents: canAdmin(admin, 'RESOLVE_INCIDENTS'),
-    canEscalateIncidents: canAdmin(admin, 'ESCALATE_INCIDENTS'),
+    canEndTripManually: has('admin.trip.end_manually'),
+    canAssignSubstitute: has('admin.trip.assign_substitute'),
+    canManualMarkPresent: has('admin.attendance.manual_mark'),
+    canResolveIncidents: has('admin.incident.resolve'),
+    canEscalateIncidents: has('admin.incident.escalate'),
 
     routeScope: role === 'TRANSPORT_OFFICER' ? 'ALL' : routeIds,
     departmentScope: role === 'FACULTY' && department ? department : 'ALL',

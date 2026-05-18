@@ -105,7 +105,16 @@ export async function getTripStudents(tripId: string) {
       where: { tripId },
       include: {
         user: {
-          select: { id: true, name: true, rollNumber: true, department: true },
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            rollNumber: true,
+            department: true,
+            year: true,
+            isActive: true,
+            createdAt: true,
+          },
         },
       },
       orderBy: { checkedInAt: 'asc' },

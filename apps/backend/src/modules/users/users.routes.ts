@@ -242,9 +242,17 @@ export async function usersRoutes(app: FastifyInstance) {
     }
 
     try {
+      const actor = assertActor(request);
       const student = await usersService.updateStudent(params.data.studentId, parsed.data);
-      return reply.send(ok(student, request.id));
+      const data = serializeUser(actor, student);
+      if (!data) {
+        throw new AppError(404, 'USER_NOT_FOUND');
+      }
+      return reply.send(ok(data, request.id));
     } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
       throw new AppError(400, 'STUDENT_UPDATE_FAILED', {
         details: [{ message: error instanceof Error ? error.message : 'Unexpected error' }],
       });

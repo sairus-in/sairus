@@ -47,6 +47,7 @@ type BaselineMatrix = Record<FixtureName, FixtureRow>;
 const TIMESTAMP_FIELDS = [
   'createdAt',
   'updatedAt',
+  'generatedAt',
   'lastLoginAt',
   'startedAt',
   'endedAt',
@@ -54,6 +55,10 @@ const TIMESTAMP_FIELDS = [
   'timestamp_',
   'deletedAt',
   'resolvedAt',
+];
+
+const VOLATILE_FIELDS = [
+  'requestId',
 ];
 
 function normalizeBody(body: unknown): unknown {
@@ -67,7 +72,9 @@ function normalizeBody(body: unknown): unknown {
 
   const masked: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    if (TIMESTAMP_FIELDS.includes(key) && (typeof value === 'string' || value !== null)) {
+    if (VOLATILE_FIELDS.includes(key)) {
+      masked[key] = '__VOLATILE__';
+    } else if (TIMESTAMP_FIELDS.includes(key) && (typeof value === 'string' || value !== null)) {
       masked[key] = '__TIMESTAMP__';
     } else if (typeof value === 'object' && value !== null) {
       masked[key] = normalizeBody(value);
@@ -244,8 +251,8 @@ async function diff(against: string, current?: string): Promise<void> {
       }
 
       // Body diff (only when status both 2xx)
-      const baselineBody = baselineRow[spec.label].body;
-      const currentBody = currentResult.body;
+      const baselineBody = normalizeBody(baselineRow[spec.label].body);
+      const currentBody = normalizeBody(currentResult.body);
 
       if (
         expectedStatus >= 200 && expectedStatus < 300 &&

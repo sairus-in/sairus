@@ -4,6 +4,7 @@ const mockGet = vi.fn();
 const mockSet = vi.fn();
 const mockSetex = vi.fn();
 const mockDel = vi.fn();
+const mockAdminScopeFindMany = vi.fn();
 
 vi.mock('../../lib/redis', () => ({
   redis: {
@@ -16,6 +17,14 @@ vi.mock('../../lib/redis', () => ({
 
 vi.mock('../../lib/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('../../lib/prisma', () => ({
+  prisma: {
+    adminScope: {
+      findMany: (...args: unknown[]) => mockAdminScopeFindMany(...args),
+    },
+  },
 }));
 
 import { resolveActor, __buildActorForTests } from './resolve-actor';
@@ -49,11 +58,13 @@ beforeEach(() => {
   mockGet.mockReset();
   mockSetex.mockReset();
   mockDel.mockReset();
+  mockAdminScopeFindMany.mockReset();
+  mockAdminScopeFindMany.mockResolvedValue([]);
 });
 
-describe('buildActor (pure)', () => {
-  it('produces mobile_student actor with STUDENT capabilities', () => {
-    const actor = __buildActorForTests(
+describe('buildActor', () => {
+  it('produces mobile_student actor with STUDENT capabilities', async () => {
+    const actor = await __buildActorForTests(
       { ...baseMobile, role: 'STUDENT' },
       'mobile',
       'req-1',
@@ -66,8 +77,8 @@ describe('buildActor (pure)', () => {
     expect(actor.sessionContext.requestId).toBe('req-1');
   });
 
-  it('produces mobile_driver actor with DRIVER capabilities', () => {
-    const actor = __buildActorForTests(
+  it('produces mobile_driver actor with DRIVER capabilities', async () => {
+    const actor = await __buildActorForTests(
       { ...baseMobile, role: 'DRIVER' },
       'mobile',
       'req-1',
@@ -77,8 +88,8 @@ describe('buildActor (pure)', () => {
     expect(actor.capabilities.has('student.attendance.checkin')).toBe(false);
   });
 
-  it('produces admin actor with role-specific capabilities', () => {
-    const actor = __buildActorForTests(
+  it('produces admin actor with role-specific capabilities', async () => {
+    const actor = await __buildActorForTests(
       { ...baseAdmin, role: 'TRANSPORT_OFFICER' },
       'admin',
       'req-1',
@@ -89,8 +100,8 @@ describe('buildActor (pure)', () => {
     expect((actor.sessionContext as { deviceId?: string }).deviceId).toBeUndefined();
   });
 
-  it('produces empty capability set for unknown admin role', () => {
-    const actor = __buildActorForTests(
+  it('produces empty capability set for unknown admin role', async () => {
+    const actor = await __buildActorForTests(
       { ...baseAdmin, role: 'STAFF' as never },
       'admin',
       'req-1',
@@ -98,8 +109,24 @@ describe('buildActor (pure)', () => {
     expect(actor.capabilities.size).toBe(0);
   });
 
-  it('returns empty scope (Phase 1a — coordinator scope hydrated later)', () => {
-    const actor = __buildActorForTests(
+  it('hydrates admin scope from AdminScope rows', async () => {
+    mockAdminScopeFindMany.mockResolvedValueOnce([
+      { routeId: 'route-1', department: null },
+      { routeId: 'route-2', department: null },
+      { routeId: null, department: 'CSE' },
+    ]);
+    const actor = await __buildActorForTests(
+      { ...baseAdmin, role: 'COORDINATOR' },
+      'admin',
+      'req-1',
+    );
+    expect(actor.scope.routeIds).toEqual(['route-1', 'route-2']);
+    expect(actor.scope.departmentIds).toEqual(['CSE']);
+  });
+
+  it('returns empty scope when AdminScope rows are missing', async () => {
+    mockAdminScopeFindMany.mockResolvedValueOnce([]);
+    const actor = await __buildActorForTests(
       { ...baseAdmin, role: 'COORDINATOR' },
       'admin',
       'req-1',

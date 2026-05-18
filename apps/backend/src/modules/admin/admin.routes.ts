@@ -3,7 +3,9 @@ import { adminService } from './admin.service';
 import { reportsService } from './reports.service';
 import { requireAdminAuth, requireAdminStepUp } from '../auth/admin-auth.middleware';
 import { adminRoute } from '../../middleware/route-guards';
-import { getAdminAccessContext, assertAdminAction } from '../../lib/admin-access';
+import { policy } from 'shared';
+import type { Actor, Capability } from 'shared';
+import { ForbiddenError } from '../../lib/errors';
 import { invalidateAdminAuthCache } from '../../lib/auth-cache';
 import { writeAuthAuditEvent, hashForLog } from '../../lib/auth-audit';
 import { revokeAdminAuthState } from '../../lib/auth-state-change';
@@ -12,7 +14,6 @@ import { AppError } from '../../lib/errors';
 import { checkAdminInviteRateLimit } from '../../lib/rate-limit';
 import { ok, okList, buildPagination, AuthAuditEventType } from 'shared';
 import { serializeImportSessionDetail, serializeImportSessionSummary } from './admin.serializers';
-import { AdminAction } from 'shared';
 import * as crypto from 'crypto';
 import * as z from 'zod';
 
@@ -157,20 +158,26 @@ export async function adminRoutes(app: FastifyInstance) {
   // All administrative routes require JWT auth and specific clearance logic
   app.addHook('onRequest', requireAdminAuth);
 
-  const requireAction = async (
+  const requireCapability = (
     request: FastifyRequest,
-    action: AdminAction,
+    capability: Capability,
     resource?: { routeId?: string | null },
-  ) => {
-    const access = await getAdminAccessContext(request.user!.sub);
-    assertAdminAction(access, action, resource);
-    return access;
+  ): Actor => {
+    const actor = request.actor;
+    if (!actor) {
+      throw new ForbiddenError('FORBIDDEN');
+    }
+    const decision = policy.can(actor, capability, resource ?? undefined);
+    if (!decision.allowed) {
+      throw new ForbiddenError('FORBIDDEN');
+    }
+    return actor;
   };
 
   app.get('/admin-users', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
-    await requireAction(request, 'INVITE_ADMIN');
+    await requireCapability(request, 'admin.admin_user.invite');
     const admins = await adminService.listAdminUsersForManagement();
 
     return reply.send(okList(
@@ -200,7 +207,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/admin-users', {
     preHandler: [...adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']), requireAdminStepUp]
   }, async (request, reply) => {
-    const access = await requireAction(request, 'INVITE_ADMIN');
+    const actor = requireCapability(request, 'admin.admin_user.invite');
     await checkAdminInviteRateLimit(request.ip);
     const parsed = adminUserBodySchema.safeParse(request.body);
     if (!parsed.success) {
@@ -244,7 +251,7 @@ export async function adminRoutes(app: FastifyInstance) {
         role: parsed.data.role,
         routeScopeCount: parsed.data.routeIds.length,
         department: parsed.data.department ?? null,
-        actorScope: access.scope.routeIds,
+        actorScope: actor.scope.routeIds,
       },
     });
 
@@ -259,7 +266,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string } }>('/admin-users/:id', {
     preHandler: [...adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']), requireAdminStepUp]
   }, async (request, reply) => {
-    await requireAction(request, 'INVITE_ADMIN');
+    await requireCapability(request, 'admin.admin_user.invite');
 
     const params = adminUserIdParamSchema.safeParse(request.params);
     if (!params.success) {
@@ -316,7 +323,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/admin-users/:id', {
     preHandler: [...adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']), requireAdminStepUp]
   }, async (request, reply) => {
-    await requireAction(request, 'INVITE_ADMIN');
+    await requireCapability(request, 'admin.admin_user.invite');
 
     const params = adminUserIdParamSchema.safeParse(request.params);
     if (!params.success) {
@@ -348,7 +355,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/admin-users/:id/reactivate', {
     preHandler: [...adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT']), requireAdminStepUp]
   }, async (request, reply) => {
-    await requireAction(request, 'INVITE_ADMIN');
+    await requireCapability(request, 'admin.admin_user.invite');
 
     const params = adminUserIdParamSchema.safeParse(request.params);
     if (!params.success) {
@@ -376,7 +383,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/admin-users/:id/suspend', {
     preHandler: [...adminRoute(['MANAGEMENT']), requireAdminStepUp]
   }, async (request, reply) => {
-    await requireAction(request, 'INVITE_ADMIN');
+    await requireCapability(request, 'admin.admin_user.invite');
 
     const params = adminUserIdParamSchema.safeParse(request.params);
     if (!params.success) {
@@ -422,7 +429,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/admin-users/:id/unsuspend', {
     preHandler: [...adminRoute(['MANAGEMENT']), requireAdminStepUp]
   }, async (request, reply) => {
-    await requireAction(request, 'INVITE_ADMIN');
+    await requireCapability(request, 'admin.admin_user.invite');
 
     const params = adminUserIdParamSchema.safeParse(request.params);
     if (!params.success) {
@@ -467,16 +474,16 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/live/dashboard', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_DASHBOARD');
-    const data = await adminService.getLiveDashboardStats(access);
+    const actor = requireCapability(request, 'admin.dashboard.view');
+    const data = await adminService.getLiveDashboardStats(actor);
     return reply.send(ok(data, request.id));
   });
 
   app.get('/live/command-center', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request) => {
-    const access = await requireAction(request, 'VIEW_COMMAND_CENTER');
-    const data = await adminService.getCommandCenter(access);
+    const actor = requireCapability(request, 'admin.command_center.view');
+    const data = await adminService.getCommandCenter(actor);
     return ok(data, request.id);
   });
 
@@ -493,13 +500,13 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/live/trips/active', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_COMMAND_CENTER');
+    const actor = requireCapability(request, 'admin.command_center.view');
     const parsed = activeTripsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
     const { page, limit } = parsed.data;
-    const result = await adminService.getActiveTrips(access, { page, limit });
+    const result = await adminService.getActiveTrips(actor, { page, limit });
     return reply.send(okList(result.trips, buildPagination(page, limit, result.total), request.id));
   });
 
@@ -516,8 +523,8 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/live/trips/:id', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_TRIP_DETAIL');
-    const state = await adminService.getTripState(request.params.id, access);
+    const actor = requireCapability(request, 'admin.trip.view');
+    const state = await adminService.getTripState(request.params.id, actor);
     if (!state) {
       throw new AppError(404, 'TRIP_NOT_FOUND', 'Trip not active or missing state');
     }
@@ -527,8 +534,8 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/live/alerts', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_COMMAND_CENTER');
-    const data = await adminService.getLiveAlerts(access);
+    const actor = requireCapability(request, 'admin.command_center.view');
+    const data = await adminService.getLiveAlerts(actor);
     return reply.send(ok(data, request.id));
   });
 
@@ -539,28 +546,28 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/corrections', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'REVIEW_CORRECTIONS');
+    const actor = requireCapability(request, 'admin.correction.review');
     const parsed = correctionsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
     const { page, limit } = parsed.data;
-    const result = await adminService.getPendingCorrections(access, { page, limit });
+    const result = await adminService.getPendingCorrections(actor, { page, limit });
     return reply.send(okList(result.corrections, buildPagination(page, limit, result.total), request.id));
   });
 
   app.post<{ Params: { id: string }, Body: { status: 'APPROVED' | 'REJECTED' } }>('/corrections/:id/resolve', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'REVIEW_CORRECTIONS');
+    const actor = requireCapability(request, 'admin.correction.review');
     const { id } = request.params;
     const { status } = request.body;
     const reviewerId = request.user!.sub;
     
-    const result = await adminService.resolveCorrection(id, status, reviewerId, access, {
+    const result = await adminService.resolveCorrection(id, status, reviewerId, actor, {
       actorType: 'ADMIN_USER',
       actorId: reviewerId,
-      routeIds: access.scope.routeIds,
+      routeIds: [...actor.scope.routeIds],
       ip: request.ip,
     });
     return reply.send(ok(result, request.id));
@@ -569,7 +576,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string } }>('/corrections/:id', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'REVIEW_CORRECTIONS');
+    const actor = requireCapability(request, 'admin.correction.review');
     const parsed = correctionPatchSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
@@ -579,11 +586,11 @@ export async function adminRoutes(app: FastifyInstance) {
       request.params.id,
       parsed.data.action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
       request.user!.sub,
-      access,
+      actor,
       {
         actorType: 'ADMIN_USER',
         actorId: request.user!.sub,
-        routeIds: access.scope.routeIds,
+        routeIds: [...actor.scope.routeIds],
         ip: request.ip,
       },
     );
@@ -598,36 +605,36 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/trips/:id/students', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_TRIP_DETAIL');
-    const data = await adminService.getTripStudents(request.params.id, access);
+    const actor = requireCapability(request, 'admin.trip.view');
+    const data = await adminService.getTripStudents(request.params.id, actor);
     return reply.send(ok(data, request.id));
   });
 
   app.get<{ Params: { id: string } }>('/trips/:id/timeline', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_TRIP_DETAIL');
-    const data = await adminService.getTripTimeline(request.params.id, access);
+    const actor = requireCapability(request, 'admin.trip.view');
+    const data = await adminService.getTripTimeline(request.params.id, actor);
     return reply.send(ok(data, request.id));
   });
 
   app.get<{ Querystring: { status?: string } }>('/incidents', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_INCIDENTS');
+    const actor = requireCapability(request, 'admin.incident.view');
     const parsed = incidentsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
     const { status, page, limit } = parsed.data;
-    const result = await adminService.getIncidents(status, access, { page, limit });
+    const result = await adminService.getIncidents(actor, status, { page, limit });
     return reply.send(okList(result.incidents, buildPagination(page, limit, result.total), request.id));
   });
 
   app.patch<{ Params: { id: string } }>('/incidents/:id/resolve', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'RESOLVE_INCIDENTS');
+    const actor = requireCapability(request, 'admin.incident.resolve');
     const parsed = incidentResolveSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
@@ -637,7 +644,7 @@ export async function adminRoutes(app: FastifyInstance) {
       request.params.id,
       request.user!.sub,
       parsed.data.resolution,
-      access,
+      actor,
     );
     return reply.send(ok({ status: incident.status }, request.id));
   });
@@ -645,85 +652,85 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/incidents/:id/escalate', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'ESCALATE_INCIDENTS');
+    const actor = requireCapability(request, 'admin.incident.escalate');
     const parsed = incidentEscalateSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    const result = await adminService.escalateIncident(request.params.id, request.user!.sub, parsed.data.note, access);
+    const result = await adminService.escalateIncident(request.params.id, request.user!.sub, actor, parsed.data.note);
     return reply.send(ok(result, request.id));
   });
 
   app.post<{ Params: { id: string } }>('/incidents/:id/assign-substitute', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'ASSIGN_SUBSTITUTE');
+    const actor = requireCapability(request, 'admin.trip.assign_substitute');
     const parsed = assignSubstituteSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    const result = await adminService.assignSubstitute(request.params.id, parsed.data.alternateBusId, request.user!.sub, access);
+    const result = await adminService.assignSubstitute(request.params.id, parsed.data.alternateBusId, request.user!.sub, actor);
     return reply.send(ok(result, request.id));
   });
 
   app.get<{ Querystring: { busId?: string, limit?: number, contextType?: string, contextId?: string } }>('/messages', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_MESSAGES');
+    const actor = requireCapability(request, 'admin.message.view');
     const parsed = messageQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
-    const data = await adminService.getMessages(parsed.data, access);
+    const data = await adminService.getMessages(parsed.data, actor);
     return reply.send(ok(data, request.id));
   });
 
   app.post('/messages', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'SEND_MESSAGE_TO_DRIVER');
+    const actor = requireCapability(request, 'admin.message.send_to_driver');
     const parsed = messageSchema.safeParse(request.body);
     if (!parsed.success) {
       throw new AppError(400, 'INVALID_MESSAGE_PAYLOAD', parsed.error.issues);
     }
 
-    const result = await adminService.sendMessage(request.user!.sub, parsed.data, access);
+    const result = await adminService.sendMessage(request.user!.sub, parsed.data, actor);
     return reply.send(ok(result, request.id));
   });
 
   app.post<{ Params: { tripId: string } }>('/trips/:tripId/notify-affected', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'SEND_MESSAGE_TO_DRIVER');
+    const actor = requireCapability(request, 'admin.message.send_to_driver');
     const parsed = notifyAffectedSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    const result = await adminService.notifyAffectedUsers(request.params.tripId, request.user!.sub, parsed.data.note, access);
+    const result = await adminService.notifyAffectedUsers(request.params.tripId, request.user!.sub, actor, parsed.data.note);
     return reply.send(ok(result, request.id));
   });
 
   app.post<{ Params: { tripId: string } }>('/trips/:tripId/request-delegate', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'COORDINATOR_OVERRIDE');
+    const actor = requireCapability(request, 'admin.trip.override');
     const parsed = delegateRequestSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    const result = await adminService.requestDelegateSupport(request.params.tripId, request.user!.sub, parsed.data.note, access);
+    const result = await adminService.requestDelegateSupport(request.params.tripId, request.user!.sub, actor, parsed.data.note);
     return reply.send(ok(result, request.id));
   });
 
   app.get<{ Params: { tripId: string } }>('/trips/:tripId/substitute-candidates', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request) => {
-    const access = await requireAction(request, 'ASSIGN_SUBSTITUTE');
-    const data = await adminService.getSubstituteCandidates(request.params.tripId, access);
+    const actor = requireCapability(request, 'admin.trip.assign_substitute');
+    const data = await adminService.getSubstituteCandidates(request.params.tripId, actor);
     return ok(data, request.id);
   });
 
@@ -734,40 +741,38 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Body: { startDate: string, endDate: string, routeId?: string } }>('/reports/attendance', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_ATTENDANCE_REPORTS');
     const { startDate, endDate, routeId } = request.body;
-    assertAdminAction(access, 'VIEW_ATTENDANCE_REPORTS', routeId ? { routeId } : undefined);
-    const result = await reportsService.enqueueAttendanceReport(access, startDate, endDate, routeId);
+    const actor = requireCapability(request, 'admin.attendance_report.view', routeId ? { routeId } : undefined);
+    const result = await reportsService.enqueueAttendanceReport(actor, startDate, endDate, routeId);
     return reply.send(ok(result, request.id));
   });
 
   app.get('/reports/attendance/overview', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_ATTENDANCE_REPORTS');
     const parsed = attendanceOverviewQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
 
-    assertAdminAction(access, 'VIEW_ATTENDANCE_REPORTS', parsed.data.routeId ? { routeId: parsed.data.routeId } : undefined);
-    const data = await reportsService.getAttendanceOverview(access, parsed.data.startDate, parsed.data.endDate, parsed.data.routeId);
+    const actor = requireCapability(request, 'admin.attendance_report.view', parsed.data.routeId ? { routeId: parsed.data.routeId } : undefined);
+    const data = await reportsService.getAttendanceOverview(actor, parsed.data.startDate, parsed.data.endDate, parsed.data.routeId);
     return reply.send(ok(data, request.id));
   });
 
   app.get<{ Params: { jobId: string } }>('/reports/:jobId/status', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_ATTENDANCE_REPORTS');
-    const data = await reportsService.getJobStatus(access, request.params.jobId);
+    const actor = requireCapability(request, 'admin.attendance_report.view');
+    const data = await reportsService.getJobStatus(actor, request.params.jobId);
     return reply.send(ok(data, request.id));
   });
 
   app.get<{ Params: { jobId: string } }>('/reports/:jobId/download', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR', 'MANAGEMENT'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'VIEW_ATTENDANCE_REPORTS');
-    const artifact = await reportsService.downloadAttendanceReport(access, request.params.jobId);
+    const actor = requireCapability(request, 'admin.attendance_report.view');
+    const artifact = await reportsService.downloadAttendanceReport(actor, request.params.jobId);
     if (!artifact) {
       throw new AppError(404, 'REPORT_ARTIFACT_NOT_FOUND');
     }
@@ -784,7 +789,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/ops/import-sessions', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
-    await requireAction(request, 'VIEW_IMPORT_SESSIONS');
+    await requireCapability(request, 'admin.import.view');
     const { prisma } = await import('../../lib/prisma');
     const sessions = await prisma.importSession.findMany({
       orderBy: { startedAt: 'desc' },
@@ -796,7 +801,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/ops/import-sessions/:id', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
-    await requireAction(request, 'VIEW_IMPORT_SESSIONS');
+    await requireCapability(request, 'admin.import.view');
     const session = await adminService.getImportSessionDetail(request.params.id);
     if (!session) {
       throw new AppError(404, 'IMPORT_SESSION_NOT_FOUND');
@@ -808,7 +813,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/ops/import-sessions/:id/retry-failed', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
-    await requireAction(request, 'RETRY_IMPORT_ROWS');
+    await requireCapability(request, 'admin.import.retry');
     const result = await adminService.retryImport(request.params.id, request.user!.sub);
     return reply.send(ok(result, request.id));
   });
@@ -816,7 +821,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/ops/pending-auth', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
-    await requireAction(request, 'VIEW_PENDING_AUTH');
+    await requireCapability(request, 'admin.auth_provisioning.view');
     const { prisma } = await import('../../lib/prisma');
     const data = await prisma.user.findMany({
       where: { authStatus: { in: ['PENDING_PROVISIONING', 'AUTH_PROVISION_FAILED'] } },
@@ -830,7 +835,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/audit-log', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'MANAGEMENT'])
   }, async (request, reply) => {
-    await requireAction(request, 'VIEW_AUDIT_LOG');
+    await requireCapability(request, 'admin.audit_log.view');
 
     const parsed = auditLogQuerySchema.safeParse(request.query);
     if (!parsed.success) {
@@ -899,38 +904,38 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get('/ops/gps-outages', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'REVIEW_GPS_OUTAGE');
-    const data = await adminService.getGpsOutageQueue(access);
+    const actor = requireCapability(request, 'admin.gps_outage.review');
+    const data = await adminService.getGpsOutageQueue(actor);
     return reply.send(ok(data, request.id));
   });
 
   app.get('/ops/gps-outage-corrections', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'REVIEW_GPS_OUTAGE');
+    const actor = requireCapability(request, 'admin.gps_outage.review');
     const parsed = gpsOutageCorrectionsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       throw new AppError(400, 'VALIDATION_ERROR', parsed.error.issues);
     }
     const { page, limit } = parsed.data;
-    const result = await adminService.getGpsOutageCorrections(access, { page, limit });
+    const result = await adminService.getGpsOutageCorrections(actor, { page, limit });
     return reply.send(okList(result.corrections, buildPagination(page, limit, result.total), request.id));
   });
 
   app.post<{ Params: { tripId: string } }>('/ops/gps-outages/:tripId/coordinator-override', {
     preHandler: adminRoute(['TRANSPORT_OFFICER', 'COORDINATOR'])
   }, async (request, reply) => {
-    const access = await requireAction(request, 'COORDINATOR_OVERRIDE');
+    const actor = requireCapability(request, 'admin.trip.override');
     const parsed = tripIdParamSchema.safeParse(request.params);
     if (!parsed.success) {
       throw new AppError(400, 'INVALID_TRIP_ID', parsed.error.issues);
     }
 
-    await adminService.assertTripAccess(parsed.data.tripId, 'COORDINATOR_OVERRIDE', access);
+    await adminService.assertTripAccess(parsed.data.tripId, 'admin.trip.override', actor);
     const result = await adminService.coordinatorMarkAllPresent(parsed.data.tripId, request.user!.sub, {
       actorType: 'ADMIN_USER',
       actorId: request.user!.sub,
-      routeIds: access.scope.routeIds,
+      routeIds: [...actor.scope.routeIds],
       ip: request.ip,
     });
     return reply.send(ok(result, request.id));

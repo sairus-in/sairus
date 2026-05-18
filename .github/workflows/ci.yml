@@ -47,6 +47,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo lint
+      - name: Route boundary grep guard
+        run: pnpm --filter backend run lint:route-boundaries
 
   # ─── Tests ────────────────────────────────────────────────
   test:

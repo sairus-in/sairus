@@ -3,7 +3,6 @@ import * as crypto from 'crypto';
 import * as z from 'zod';
 import { AuthAuditEventType, AdminJWTPayload, ok } from 'shared';
 import { invalidateAdminAuthCache } from '../../lib/auth-cache';
-import { getAdminAccessContext } from '../../lib/admin-access';
 import { writeAuthAuditEvent, hashForLog } from '../../lib/auth-audit';
 import { clearAdminSessionCookies } from '../../lib/admin-session';
 import { AppError } from '../../lib/errors';
@@ -170,12 +169,10 @@ export async function adminAuthRoutes(app: FastifyInstance) {
 
   app.get('/me', { preHandler: [requireAdminAuth] }, async (req, reply) => {
     const adminId = (req.user as AdminJWTPayload).sub;
-    const [admin, access] = await Promise.all([
-      adminAuthRepository.getUserById(adminId),
-      getAdminAccessContext(adminId),
-    ]);
+    const admin = await adminAuthRepository.getUserById(adminId);
+    const actor = req.actor;
 
-    if (!admin || !admin.isActive) {
+    if (!admin || !admin.isActive || !actor) {
       throw new AppError(401, 'UNAUTHORIZED');
     }
 
@@ -186,8 +183,9 @@ export async function adminAuthRoutes(app: FastifyInstance) {
       role: admin.role,
       isActive: admin.isActive,
       mfaEnabled: admin.mfaEnabled,
-      routeIds: access.scope.routeIds,
-      department: access.department,
+      routeIds: [...actor.scope.routeIds],
+      department: actor.scope.departmentIds[0] ?? null,
+      capabilities: Array.from(actor.capabilities),
     }, req.id));
   });
 

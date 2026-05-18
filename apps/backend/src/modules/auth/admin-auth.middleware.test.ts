@@ -35,6 +35,23 @@ vi.mock('./admin-auth.service', () => ({
   consumeAdminStepUpToken: mockConsumeAdminStepUpToken,
 }));
 
+vi.mock('../../lib/prisma', () => ({
+  prisma: {
+    adminScope: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+  },
+}));
+
+vi.mock('../../lib/redis', () => ({
+  redis: {
+    get: vi.fn().mockResolvedValue(null),
+    setex: vi.fn().mockResolvedValue('OK'),
+    set: vi.fn().mockResolvedValue('OK'),
+    del: vi.fn().mockResolvedValue(1),
+  },
+}));
+
 const buildReply = () => {
   const reply: any = {
     statusCode: 200,

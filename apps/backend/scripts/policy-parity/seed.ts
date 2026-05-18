@@ -28,10 +28,44 @@ import {
 
 const PLACEHOLDER_HASH = '$2b$10$parity.placeholder.hash.only.used.in.test.env.xxxxxxxxxxx';
 
+async function resetParityVolatileAuthState(): Promise<void> {
+  const parityAdminIds = [
+    PARITY_ADMIN_TO_ID,
+    PARITY_ADMIN_COORD_ID,
+    PARITY_ADMIN_FACULTY_ID,
+    PARITY_ADMIN_MGMT_ID,
+  ];
+
+  const resetKeys = [
+    'ratelimit:admin:api:ip:127.0.0.1',
+    'ratelimit:admin:api:ip:::1',
+    'ratelimit:admin:api:ip:::ffff:127.0.0.1',
+  ];
+
+  for (const adminId of parityAdminIds) {
+    resetKeys.push(
+      `ratelimit:admin:api:${adminId}`,
+      `auth:admin:anomaly:score:${adminId}:${SESSION_VERSION}`,
+      `auth:admin:anomaly:reauth:${adminId}:${SESSION_VERSION}`,
+      `auth:admin:stepup:failed:${adminId}:${SESSION_VERSION}`,
+    );
+
+    const markerKeys = await redis.keys(`auth:admin:anomaly:marker:*:${adminId}:${SESSION_VERSION}:*`);
+    resetKeys.push(...markerKeys);
+  }
+
+  await redis.del(...resetKeys);
+  await prisma.adminFingerprint.deleteMany({
+    where: { adminId: { in: parityAdminIds } },
+  });
+}
+
 export async function seedParityData(): Promise<void> {
   console.log('[parity:seed] Starting idempotent seed…');
 
   // ── Routes ──────────────────────────────────────────────────────────────────
+  await resetParityVolatileAuthState();
+
   await prisma.route.upsert({
     where: { id: PARITY_ROUTE_1_ID },
     create: {

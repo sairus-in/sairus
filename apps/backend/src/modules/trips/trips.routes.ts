@@ -1,10 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { cuidSchema, ok, okList } from 'shared';
+import { cuidSchema, ok, okList, serializeTrip, serializeUser } from 'shared';
 import { AppError } from '../../lib/errors';
 import { mobileRoute, adminRoute } from '../../middleware/route-guards';
 import { checkRateLimit, RateLimits } from '../../lib/rate-limit';
 import { cacheIdempotentResponse, IDEMPOTENCY_TTL } from '../../plugins/idempotency';
+import { assertActor } from '../../spine/auth';
 import { tripsService } from './trips.service';
 import { delegateService } from './delegate.service';
 
@@ -54,8 +55,10 @@ export async function tripsRoutes(app: FastifyInstance) {
       reply,
     });
 
+    const actor = assertActor(request);
     const trip = await tripsService.startTrip(params.data.tripId, request.user!.sub);
-    const body = ok(trip, request.id);
+    const serializedTrip = serializeTrip(actor, trip, { driverName: '' });
+    const body = ok(serializedTrip, request.id);
     await cacheIdempotentResponse(request, 200, body, IDEMPOTENCY_TTL.ONE_DAY);
     return reply.send(body);
   });
@@ -67,12 +70,14 @@ export async function tripsRoutes(app: FastifyInstance) {
     const params = z.object({ tripId: cuidSchema }).safeParse(request.params);
     if (!params.success) throw new AppError(400, 'VALIDATION_ERROR', params.error.issues);
 
+    const actor = assertActor(request);
     const trip = await tripsService.endTrip(params.data.tripId, request.user!.sub, {
       actorType: 'MOBILE_USER',
       actorId: request.user!.sub,
       ip: request.ip,
     });
-    return reply.send(ok(trip, request.id));
+    const serializedTrip = serializeTrip(actor, trip, { driverName: '' });
+    return reply.send(ok(serializedTrip, request.id));
   });
 
   // DRIVER: Get the student attendance list for a given trip
@@ -82,8 +87,15 @@ export async function tripsRoutes(app: FastifyInstance) {
     const params = z.object({ tripId: cuidSchema }).safeParse(request.params);
     if (!params.success) throw new AppError(400, 'VALIDATION_ERROR', params.error.issues);
 
-    const students = await tripsService.getTripStudents(params.data.tripId);
-    return reply.send(okList(students, { page: 1, limit: students.length, total: students.length, hasMore: false }, request.id));
+    const actor = assertActor(request);
+    const attendanceRows = await tripsService.getTripStudents(params.data.tripId);
+    const data = attendanceRows
+      .map((row) => ({
+        ...row,
+        user: serializeUser(actor, row.user),
+      }))
+      .filter((row) => row.user);
+    return reply.send(okList(data, { page: 1, limit: data.length, total: data.length, hasMore: false }, request.id));
   });
 
   // DRIVER: Manually mark a student as present
@@ -106,16 +118,30 @@ export async function tripsRoutes(app: FastifyInstance) {
   app.get('/late-starts', {
     preHandler: adminRoute(['COORDINATOR', 'TRANSPORT_OFFICER', 'MANAGEMENT']),
   }, async (request, reply) => {
-    const trips = await tripsService.getLateStartTrips();
-    return reply.send(okList(trips, { page: 1, limit: trips.length, total: trips.length, hasMore: false }, request.id));
+    const actor = assertActor(request);
+    const lateStartRows = await tripsService.getLateStartTrips();
+    const data = lateStartRows.map((row) => ({
+      ...serializeTrip(actor, row, { driverName: '' }),
+      bus: row.bus ? { id: row.bus.id, number: row.bus.number } : null,
+      route: row.route ? { id: row.route.id, name: row.route.name } : null,
+    }));
+    return reply.send(okList(data, { page: 1, limit: data.length, total: data.length, hasMore: false }, request.id));
   });
 
   // DRIVER: Get the driver's scheduled trip for today (shown on app open)
   app.get('/my-trip', {
     preHandler: mobileRoute(['DRIVER']),
   }, async (request, reply) => {
-    const trip = await tripsService.getScheduledTripForDriver(request.user!.sub);
-    return reply.send(ok(trip, request.id));
+    const actor = assertActor(request);
+    const scheduledTrip = await tripsService.getScheduledTripForDriver(request.user!.sub);
+    const data = scheduledTrip
+      ? {
+          ...serializeTrip(actor, scheduledTrip, { driverName: '' }),
+          bus: scheduledTrip.bus ? { id: scheduledTrip.bus.id, number: scheduledTrip.bus.number } : null,
+          route: scheduledTrip.route ? { id: scheduledTrip.route.id, name: scheduledTrip.route.name } : null,
+        }
+      : null;
+    return reply.send(ok(data, request.id));
   });
 
   // ==========================================

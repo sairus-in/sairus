@@ -100,7 +100,8 @@ export interface AdminSessionUser {
   role: AdminRole;
   mfaEnabled?: boolean;
   routeIds?: string[];
-  department?: string;
+  department?: string | null;
+  capabilities: string[];
 }
 
 export interface AdminLoginMfaChallengeResponse {

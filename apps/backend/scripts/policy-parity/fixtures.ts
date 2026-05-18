@@ -87,11 +87,24 @@ export interface Fixture {
   headers: () => Record<string, string>;
 }
 
+const adminFingerprintHeaders = {
+  'User-Agent': 'policy-parity/1.0',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'X-Admin-Timezone': 'America/New_York',
+  'X-Admin-Screen-Res': '1440x900',
+  'X-Admin-Color-Depth': '24',
+  'X-Admin-Platform': 'parity',
+  'X-Admin-Hardware-Concurrency': '8',
+  'X-Country-Code': 'US',
+  'X-IP-ASN': 'parity-asn',
+};
+
 export const fixtures: Fixture[] = [
   {
     name: 'transport_officer',
     description: 'TRANSPORT_OFFICER — full capability set',
     headers: () => ({
+      ...adminFingerprintHeaders,
       Cookie: `admin_jwt=${signAdmin(PARITY_ADMIN_TO_ID, 'TRANSPORT_OFFICER')}`,
     }),
   },
@@ -99,6 +112,7 @@ export const fixtures: Fixture[] = [
     name: 'coordinator_route1',
     description: 'COORDINATOR — scoped to route-1 only',
     headers: () => ({
+      ...adminFingerprintHeaders,
       Cookie: `admin_jwt=${signAdmin(PARITY_ADMIN_COORD_ID, 'COORDINATOR', {
         coordinatorRouteIds: [PARITY_ROUTE_1_ID],
       })}`,
@@ -108,6 +122,7 @@ export const fixtures: Fixture[] = [
     name: 'faculty_dept',
     description: 'FACULTY — limited read-only caps, dept-scoped',
     headers: () => ({
+      ...adminFingerprintHeaders,
       Cookie: `admin_jwt=${signAdmin(PARITY_ADMIN_FACULTY_ID, 'FACULTY')}`,
     }),
   },
@@ -115,6 +130,7 @@ export const fixtures: Fixture[] = [
     name: 'management',
     description: 'MANAGEMENT — oversight caps, no live-ops writes',
     headers: () => ({
+      ...adminFingerprintHeaders,
       Cookie: `admin_jwt=${signAdmin(PARITY_ADMIN_MGMT_ID, 'MANAGEMENT')}`,
     }),
   },

@@ -20,14 +20,11 @@ export interface RouteSpec {
   capability: string;
 }
 
-function toISODate(d: Date): string {
-  // IST = UTC+5:30
-  const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
-  return ist.toISOString().slice(0, 10);
-}
-
-const today = toISODate(new Date());
-const weekAgo = toISODate(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+// Keep the report query stable across days so baseline diffs only reflect
+// behavior changes. Override in local runs when deliberately testing a new
+// fixture date range.
+const reportStartDate = process.env.PARITY_REPORT_START_DATE ?? '2026-05-10';
+const reportEndDate = process.env.PARITY_REPORT_END_DATE ?? '2026-05-17';
 
 export const routeSpecs: RouteSpec[] = [
   // ── Admin live-ops ────────────────────────────────────────────────────────
@@ -78,7 +75,7 @@ export const routeSpecs: RouteSpec[] = [
   {
     label: 'admin.attendance_overview',
     method: 'GET',
-    path: `/v1/admin/reports/attendance/overview?startDate=${weekAgo}&endDate=${today}`,
+    path: `/v1/admin/reports/attendance/overview?startDate=${reportStartDate}&endDate=${reportEndDate}`,
     capability: 'VIEW_ATTENDANCE_REPORTS → admin.attendance_report.view',
   },
 

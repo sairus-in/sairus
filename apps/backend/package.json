@@ -15,7 +15,8 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src --ext .ts --rulesdir eslint-rules",
+    "lint:route-boundaries": "node scripts/check-route-boundaries.cjs",
     "test": "vitest"
   },
   "keywords": [

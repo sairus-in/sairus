@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
 import { ForbiddenError } from '../../lib/errors';
-import { ResolvedAdminAccessContext } from '../../lib/admin-access';
 import { prisma } from '../../lib/prisma';
 import { redis } from '../../lib/redis';
+import type { Actor } from 'shared';
 import { AdminAttendanceReportOverview, AdminAttendanceTrendPoint, AdminReportStatus } from 'shared';
 
 const REPORT_TTL_SECONDS = 60 * 60;
@@ -40,9 +40,9 @@ class ReportsService {
     };
   }
 
-  private resolveScopedRouteIds(access: ResolvedAdminAccessContext, requestedRouteId?: string): string[] {
-    if (access.role === 'COORDINATOR') {
-      const allowedRouteIds = access.scope.routeIds;
+  private resolveScopedRouteIds(actor: Actor, requestedRouteId?: string): string[] {
+    if (actor.role === 'COORDINATOR') {
+      const allowedRouteIds = [...actor.scope.routeIds];
       if (allowedRouteIds.length === 0) {
         throw new ForbiddenError('NO_COORDINATOR_SCOPE');
       }
@@ -61,12 +61,12 @@ class ReportsService {
     return requestedRouteId ? [requestedRouteId] : [];
   }
 
-  private assertReportAccess(access: ResolvedAdminAccessContext, status: PersistedReportStatus) {
-    if (access.role !== 'COORDINATOR') {
+  private assertReportAccess(actor: Actor, status: PersistedReportStatus) {
+    if (actor.role !== 'COORDINATOR') {
       return;
     }
 
-    if (status.requestedByAdminId !== access.adminId) {
+    if (status.requestedByAdminId !== actor.actorId) {
       throw new ForbiddenError('REPORT_OWNERSHIP_REQUIRED');
     }
 
@@ -74,7 +74,7 @@ class ReportsService {
       throw new ForbiddenError('REPORT_OUTSIDE_SCOPE');
     }
 
-    const allowedRouteIds = new Set(access.scope.routeIds);
+    const allowedRouteIds = new Set(actor.scope.routeIds);
     const hasOutOfScopeRoute = status.scopeRouteIds.some((routeId) => !allowedRouteIds.has(routeId));
     if (hasOutOfScopeRoute) {
       throw new ForbiddenError('REPORT_OUTSIDE_SCOPE');
@@ -247,25 +247,25 @@ class ReportsService {
   }
 
   async getAttendanceOverview(
-    access: ResolvedAdminAccessContext,
+    actor: Actor,
     startDate: string,
     endDate: string,
     routeId?: string,
   ): Promise<AdminAttendanceReportOverview> {
-    const scopedRouteIds = this.resolveScopedRouteIds(access, routeId);
+    const scopedRouteIds = this.resolveScopedRouteIds(actor, routeId);
     return this.getAttendanceOverviewInternal(startDate, endDate, scopedRouteIds, routeId);
   }
 
   async enqueueAttendanceReport(
-    access: ResolvedAdminAccessContext,
+    actor: Actor,
     startDate: string,
     endDate: string,
     routeId?: string,
   ) {
     const jobId = randomUUID();
-    const scopedRouteIds = this.resolveScopedRouteIds(access, routeId);
+    const scopedRouteIds = this.resolveScopedRouteIds(actor, routeId);
     const metadata = {
-      requestedByAdminId: access.adminId,
+      requestedByAdminId: actor.actorId,
       scopeRouteIds: scopedRouteIds,
       requestedRouteId: routeId ?? null,
     };
@@ -364,25 +364,25 @@ class ReportsService {
     }
   }
 
-  async getJobStatus(access: ResolvedAdminAccessContext, jobId: string): Promise<AdminReportStatus | null> {
+  async getJobStatus(actor: Actor, jobId: string): Promise<AdminReportStatus | null> {
     const raw = await redis.get(this.statusKey(jobId));
     if (!raw) {
       return null;
     }
 
     const status = JSON.parse(raw) as PersistedReportStatus;
-    this.assertReportAccess(access, status);
+    this.assertReportAccess(actor, status);
     return this.toPublicStatus(status);
   }
 
-  async downloadAttendanceReport(access: ResolvedAdminAccessContext, jobId: string) {
+  async downloadAttendanceReport(actor: Actor, jobId: string) {
     const raw = await redis.get(this.statusKey(jobId));
     if (!raw) {
       return null;
     }
 
     const status = JSON.parse(raw) as PersistedReportStatus;
-    this.assertReportAccess(access, status);
+    this.assertReportAccess(actor, status);
 
     return redis.get(this.artifactKey(jobId));
   }
